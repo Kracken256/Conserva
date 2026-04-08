@@ -1,0 +1,9 @@
+[package]
+name = "digital_twin_glue"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nalgebra = { version = "0.34", features = ["serde-serialize"] }
+serde = { version = "1.0", features = ["derive"] }
+uom = { version = "0.38.0", features = ["serde"] }

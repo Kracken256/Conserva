@@ -1,0 +1,9 @@
+[package]
+name = "digital_twin"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+digital_twin_glue = { path = "../digital_twin_glue" }
+nalgebra = "0.34"
+uom = { version = "0.38.0", features = ["serde"] }

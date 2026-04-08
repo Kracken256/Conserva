@@ -1,0 +1,10 @@
+[package]
+name = "Conserva"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+digital_twin_glue = { path = "crates/digital_twin_glue" }
+digital_twin = { path = "crates/digital_twin" }
+nalgebra = "0.34"
+uom = { version = "0.38.0", features = ["serde"] }
