@@ -35,7 +35,10 @@ pub fn get_initial_state() -> MissileState {
         dry_mass: Mass::new::<kilogram>(40.0),
         propellant_mass: Mass::new::<kilogram>(100.0),
         motor_thrust: Force::new::<newton>(0.0),
-        inertia_tensor: Matrix3::new(0.05, 0.0, 0.0, 0.0, 0.05, 0.0, 0.0, 0.0, 0.005),
+        // Normalized inertia tensor (I / m) for a cylinder: L = 1.4m, r = 0.05m
+        // I_xx = I_yy = (3*r^2 + L^2) / 12 = 0.1639
+        // I_zz = (r^2) / 2 = 0.00125
+        inertia_tensor: Matrix3::new(0.1639, 0.0, 0.0, 0.0, 0.1639, 0.0, 0.0, 0.0, 0.00125),
     }
 }
 
@@ -43,19 +46,19 @@ pub fn get_default_config() -> MissileConfig {
     MissileConfig {
         body_length: Length::new::<meter>(1.4),
         diameter: Length::new::<meter>(0.1),
-        fin_offset_from_nose: Length::new::<meter>(0.2),
-        fin_chord_length: Length::new::<meter>(0.05),
-        pitch_pid_kp: 0.05,
-        pitch_pid_ki: 0.0,
-        pitch_pid_kd: 0.0,
-        yaw_pid_kp: 0.05,
-        yaw_pid_ki: 0.0,
-        yaw_pid_kd: 0.0,
+        fin_offset_from_nose: Length::new::<meter>(1.2),
+        fin_chord_length: Length::new::<meter>(0.2),
+        pitch_pid_kp: 0.365516,
+        pitch_pid_ki: 0.100000,
+        pitch_pid_kd: 0.000000,
+        yaw_pid_kp: 0.365516,
+        yaw_pid_ki: 0.100000,
+        yaw_pid_kd: 0.000000,
         motor_impulse_curve: vec![
             (Time::new::<second>(0.0), Force::new::<newton>(0.0)),
             (Time::new::<second>(0.1), Force::new::<newton>(17800.0)),
-            (Time::new::<second>(20.2), Force::new::<newton>(17800.0)),
-            (Time::new::<second>(20.4), Force::new::<newton>(0.0)),
+            (Time::new::<second>(10.2), Force::new::<newton>(17800.0)),
+            (Time::new::<second>(10.4), Force::new::<newton>(0.0)),
         ],
     }
 }
