@@ -43,8 +43,8 @@ impl Rk4 {
         // 4. ROTATIONAL DYNAMICS (Body Frame)
         let dw = inertia_inv * (torque_body - w.cross(&(inertia * w)));
 
-        // 5. ORIENTATION DYNAMICS
-        let dq = 0.5 * Quaternion::new(0.0, w.x, w.y, w.z) * q;
+        // 5. ORIENTATION DYNAMICS (Body Frame angular velocity implies post-multiplication)
+        let dq = q * Quaternion::new(0.0, w.x, w.y, w.z) * 0.5;
 
         (dp, dv, dw, dq)
     }
