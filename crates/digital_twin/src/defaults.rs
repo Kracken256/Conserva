@@ -9,7 +9,7 @@ use uom::si::mass::kilogram;
 use uom::si::time::second;
 use uom::si::velocity::meter_per_second;
 
-pub fn get_initial_state() -> MissileState {
+pub fn get_initial_state(config: &MissileConfig) -> MissileState {
     MissileState {
         position: [
             Length::new::<meter>(0.0),
@@ -32,18 +32,27 @@ pub fn get_initial_state() -> MissileState {
         .into(),
         fin_angles: [Angle::new::<radian>(0.0); 4],
         tvc_angles: [Angle::new::<radian>(0.0); 2],
-        dry_mass: Mass::new::<kilogram>(40.0),
-        propellant_mass: Mass::new::<kilogram>(100.0),
+        time: Time::new::<second>(0.0),
+        current_mass: config.mass.wet_mass,
         motor_thrust: Force::new::<newton>(0.0),
-        // Normalized inertia tensor (I / m) for a cylinder: L = 1.4m, r = 0.05m
-        // I_xx = I_yy = (3*r^2 + L^2) / 12 = 0.1639
-        // I_zz = (r^2) / 2 = 0.00125
-        inertia_tensor: Matrix3::new(0.1639, 0.0, 0.0, 0.0, 0.1639, 0.0, 0.0, 0.0, 0.00125),
     }
 }
 
 pub fn get_default_config() -> MissileConfig {
     MissileConfig {
+        mass: MissileMassConfig {
+            dry_mass: Mass::new::<kilogram>(40.0),
+            wet_mass: Mass::new::<kilogram>(140.0),
+            mass_curve: vec![
+                (Time::new::<second>(0.0), Mass::new::<kilogram>(140.0)),
+                (Time::new::<second>(10.4), Mass::new::<kilogram>(40.0)),
+                (Time::new::<second>(100.0), Mass::new::<kilogram>(40.0)),
+            ],
+            // Normalized inertia tensor (I / m) for a cylinder: L = 1.4m, r = 0.05m
+            // I_xx = I_yy = (3*r^2 + L^2) / 12 = 0.1639
+            // I_zz = (r^2) / 2 = 0.00125
+            inertia_tensor: Matrix3::new(0.1639, 0.0, 0.0, 0.0, 0.1639, 0.0, 0.0, 0.0, 0.00125),
+        },
         geometry: MissileGeometryConfig {
             body_length: Length::new::<meter>(1.4),
             diameter: Length::new::<meter>(0.1),

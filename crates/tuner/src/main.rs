@@ -25,7 +25,7 @@ fn evaluate_pid(kp: f64, ki: f64, kd: f64, max_time: f64) -> f64 {
     config.controller.yaw_pid_ki = ki;
     config.controller.yaw_pid_kd = kd;
 
-    let state = get_initial_state();
+    let state = get_initial_state(&config);
     let mesh_generator = TheMeshGenerator::default();
 
     let target_vec = Vector3::new(1000.0, 1000.0, 1000.0);

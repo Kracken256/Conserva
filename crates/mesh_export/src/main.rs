@@ -4,8 +4,8 @@ use std::fs::File;
 use std::io::{self, Write};
 
 fn main() -> io::Result<()> {
-    let state = get_initial_state();
     let config = get_default_config();
+    let state = get_initial_state(&config);
     let mut mesh = Mesh::default();
     let mesh_generator = TheMeshGenerator::default();
 
@@ -51,8 +51,8 @@ mod tests {
     #[test]
     fn test_valid_obj_vertex_output() {
         // A minimal test to check if vertices format right
-        let state = get_initial_state();
         let config = get_default_config();
+        let state = get_initial_state(&config);
         let mut mesh = Mesh::default();
         let mesh_generator = TheMeshGenerator::default();
 

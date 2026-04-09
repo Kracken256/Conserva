@@ -1,12 +1,10 @@
 use digital_twin_glue::prelude::*;
 use nalgebra::Vector3;
-use uom::si::acceleration::meter_per_second_squared;
 use uom::si::angle::radian;
 use uom::si::angular_velocity::radian_per_second;
-use uom::si::f64::{Acceleration, Angle, Force, Length, Mass, Time};
+use uom::si::f64::{Angle, Force, Length, Mass, Time};
 use uom::si::force::newton;
 use uom::si::length::meter;
-use uom::si::mass::kilogram;
 use uom::si::time::second;
 
 #[derive(Debug, Clone)]
@@ -106,6 +104,38 @@ impl FlightComputer {
         Force::new::<newton>(0.0)
     }
 
+    /// Evaluates the configured mass curve at the current firmware execution time
+    pub fn current_mass(&self) -> Mass {
+        let points = &self.config.mass.mass_curve;
+        if points.is_empty() {
+            return self.config.mass.dry_mass;
+        }
+
+        let first_t = points[0].0.get::<second>();
+        let last_t = points.last().unwrap().0.get::<second>();
+
+        if self.time <= first_t {
+            return points[0].1;
+        }
+        if self.time >= last_t {
+            return points.last().unwrap().1;
+        }
+
+        for i in 0..points.len() - 1 {
+            let t0 = points[i].0.get::<second>();
+            let t1 = points[i + 1].0.get::<second>();
+
+            if self.time >= t0 && self.time <= t1 {
+                let m0 = points[i].1;
+                let m1 = points[i + 1].1;
+                let percent = (self.time - t0) / (t1 - t0);
+                return m0 + (m1 - m0) * percent;
+            }
+        }
+
+        self.config.mass.dry_mass
+    }
+
     pub fn tick(&mut self, state: &MissileState, dt: f64) -> MissileState {
         let mut new_state = state.clone();
 
@@ -166,30 +196,13 @@ impl FlightComputer {
         new_state.tvc_angles[1] = Angle::new::<radian>(yaw_actuated);
 
         // 7. Track Motor Propellant Mass Depletion & Store Thrust Force
-        let thrust = if state.propellant_mass > Mass::new::<kilogram>(0.0) {
-            self.current_thrust()
-        } else {
-            Force::new::<newton>(0.0) // Out of fuel! Engine flameout.
-        };
+        let thrust = self.current_thrust();
 
         new_state.motor_thrust = thrust;
 
-        if thrust > Force::new::<newton>(0.0) {
-            // Approximation for solid motor: m_dot = F / (Isp * g0)
-            let isp = Time::new::<second>(250.0);
-            let g0 = Acceleration::new::<meter_per_second_squared>(9.80665);
-            let m_dot = thrust / (isp * g0); // kg/sec
-
-            let dt_time = Time::new::<second>(dt);
-            let burned_mass = m_dot * dt_time;
-
-            let mut updated_propellant = state.propellant_mass - burned_mass;
-            if updated_propellant < Mass::new::<kilogram>(0.0) {
-                updated_propellant = Mass::new::<kilogram>(0.0); // Never drop below 0 propellant
-            }
-
-            new_state.propellant_mass = updated_propellant;
-        }
+        // 8. Update Vehicle Mass from Mass Curve
+        new_state.current_mass = self.current_mass();
+        new_state.time = Time::new::<second>(self.time);
 
         new_state
     }
@@ -199,6 +212,10 @@ impl FlightComputer {
 mod tests {
     use super::*;
     use crate::defaults::{get_default_config, get_initial_state};
+    use uom::si::f64::{Mass, Time};
+    use uom::si::force::newton;
+    use uom::si::mass::kilogram;
+    use uom::si::time::second;
 
     /// When the rocket is already aligned with the waypoint straight ahead
     /// along the body +Z axis, the guidance law should not command any
@@ -206,8 +223,8 @@ mod tests {
     /// is the forward axis used by the controller.
     #[test]
     fn waypoint_directly_ahead_requires_no_lateral_command() {
-        let state = get_initial_state();
         let config = get_default_config();
+        let state = get_initial_state(&config);
 
         // Place the waypoint directly in front of the rocket along +Z in world
         // (rocket starts at the origin with identity orientation).
@@ -315,38 +332,35 @@ mod tests {
     }
 
     #[test]
-    fn tick_depletes_propellant() {
-        let state = get_initial_state();
+    fn tick_updates_mass_from_curve() {
         let mut config = get_default_config();
-        config.engine.motor_impulse_curve = vec![
-            (Time::new::<second>(0.0), Force::new::<newton>(5000.0)),
-            (Time::new::<second>(10.0), Force::new::<newton>(5000.0)),
+        let state = get_initial_state(&config);
+
+        config.mass.mass_curve = vec![
+            (Time::new::<second>(0.0), Mass::new::<kilogram>(100.0)),
+            (Time::new::<second>(10.0), Mass::new::<kilogram>(50.0)),
         ];
 
         let mut fc = FlightComputer::new(config, None);
-        fc.time = 0.0; // starts at T=0
+        fc.time = 5.0; // Halfway according to the curve
 
-        let initial_mass = state.propellant_mass.value;
         let dt = 0.1;
 
         let new_state = fc.tick(&state, dt);
-        let new_mass = new_state.propellant_mass.value;
+        let new_mass = new_state.current_mass.value;
 
-        assert!(new_mass < initial_mass, "Propellant should deplete");
-
-        // Expected consumption Calculation
-        // m_dot = F / (Isp * g0) = 5000 / (250 * 9.80665) = 2.0394... kg/s
-        let expected_burned = dt * 5000.0 / (250.0 * 9.80665);
+        // At T=5.1, mass should evaluate to 74.5 (midpoint of 100 to 50)
         assert!(
-            (new_mass - (initial_mass - expected_burned)).abs() < 1e-6,
-            "Mass depletion rate incorrect"
+            (new_mass - 74.5).abs() < 1e-6,
+            "Mass interpolation incorrect: expected 74.5, got {}",
+            new_mass
         );
     }
 
     #[test]
     fn off_axis_waypoint_generates_steering_command() {
-        let state = get_initial_state();
         let mut config = get_default_config();
+        let state = get_initial_state(&config);
         // Give some PID values to ensure commands are generated
         config.controller.pitch_pid_kp = 1.0;
         config.controller.yaw_pid_kp = 1.0;

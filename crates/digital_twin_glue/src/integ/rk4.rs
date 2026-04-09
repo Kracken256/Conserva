@@ -1,4 +1,5 @@
 use crate::control::state::MissileState;
+use crate::geometry::config::MissileConfig;
 use nalgebra::{Matrix3, Quaternion, UnitQuaternion, Vector3};
 use uom::si::angular_velocity::radian_per_second;
 use uom::si::f64::{AngularVelocity, Length, Velocity};
@@ -49,7 +50,13 @@ impl Rk4 {
         (dp, dv, dw, dq)
     }
 
-    pub fn step<F>(&mut self, state: &MissileState, mut get_forces: F, dt: f64) -> MissileState
+    pub fn step<F>(
+        &mut self,
+        config: &MissileConfig,
+        state: &MissileState,
+        mut get_forces: F,
+        dt: f64,
+    ) -> MissileState
     where
         F: FnMut(
             &Vector3<f64>,
@@ -58,10 +65,10 @@ impl Rk4 {
             &Vector3<f64>,
         ) -> (Vector3<f64>, Vector3<f64>),
     {
-        let mass = state.total_mass().value;
+        let mass = state.current_mass.value;
         // Approximation: scale the identity inertia tensor by the total mass
         // For a more accurate reading, you would want to calculate the actual moment of inertia for an elongating cylinder payload vs mass distribution over time.
-        let inertia = state.inertia_tensor * mass;
+        let inertia = config.mass.inertia_tensor * mass;
         let inertia_inv = inertia.try_inverse().unwrap_or_else(Matrix3::identity);
 
         let p = state.position.map(|c| c.value);

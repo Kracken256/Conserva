@@ -38,8 +38,8 @@ fn print_state(state: &MissileState, target: Option<Vector3<uom::si::f64::Length
 }
 
 fn main() {
-    let state = get_initial_state();
     let config = get_default_config();
+    let state = get_initial_state(&config);
     let mesh_generator = TheMeshGenerator::default();
 
     let waypoint = Some(Vector3::new(
@@ -116,7 +116,8 @@ mod tests {
     #[test]
     fn test_print_state_formatting_placeholder() {
         // Simple sanity check that the main testing harness is properly compiling
-        let state = get_initial_state();
+        let config = get_default_config();
+        let state = get_initial_state(&config);
         let target = Some(Vector3::new(
             Length::new::<meter>(100.0),
             Length::new::<meter>(200.0),

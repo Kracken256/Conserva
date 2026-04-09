@@ -1,5 +1,6 @@
+use nalgebra::Matrix3;
 use serde::{Deserialize, Serialize};
-use uom::si::f64::{Force, Length, Time};
+use uom::si::f64::{Force, Length, Mass, Time};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MissileGeometryConfig {
@@ -25,8 +26,17 @@ pub struct MissileEngineConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MissileMassConfig {
+    pub dry_mass: Mass,
+    pub wet_mass: Mass,
+    pub mass_curve: Vec<(Time, Mass)>,
+    pub inertia_tensor: Matrix3<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MissileConfig {
     pub geometry: MissileGeometryConfig,
     pub controller: MissileControllerConfig,
     pub engine: MissileEngineConfig,
+    pub mass: MissileMassConfig,
 }

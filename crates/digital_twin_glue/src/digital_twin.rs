@@ -77,8 +77,8 @@ impl DigitalTwin {
 
                 // Calculate dynamic Center of Gravity (CoG)
                 let body_length = self.config.geometry.body_length.get::<meter>();
-                let dry_m = sub_state.dry_mass.value;
-                let prop_m = sub_state.propellant_mass.value;
+                let dry_m = self.config.mass.dry_mass.value;
+                let prop_m = sub_state.current_mass.value - dry_m;
                 // Assume dry mass center is at geometric z=0 (middle)
                 // Assume propellant mass center is at z = -body_length / 4.0 (lower half)
                 let cg_z = (0.0 * dry_m + (-body_length / 4.0) * prop_m) / (dry_m + prop_m);
@@ -92,7 +92,7 @@ impl DigitalTwin {
             };
 
         // 3. Let RK4 run the show
-        self.state = self.rk4.step(&self.state, physics_engine, dt);
+        self.state = self.rk4.step(&self.config, &self.state, physics_engine, dt);
     }
 }
 

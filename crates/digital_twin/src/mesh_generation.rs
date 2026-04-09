@@ -6,7 +6,7 @@ use uom::si::length::meter;
 pub struct TheMeshGenerator {}
 
 impl MeshGenerator for TheMeshGenerator {
-    fn generate(&self, _state: &MissileState, config: &MissileConfig, mesh: &mut Mesh) {
+    fn generate(&self, state: &MissileState, config: &MissileConfig, mesh: &mut Mesh) {
         let radius = config.geometry.diameter.get::<meter>() / 2.0;
         let body_length = config.geometry.body_length.get::<meter>();
         let fin_offset = config.geometry.fin_offset_from_nose.get::<meter>();
@@ -17,8 +17,8 @@ impl MeshGenerator for TheMeshGenerator {
         let nose_length = config.geometry.diameter.get::<meter>() * 2.0; // Typical rocket nose
 
         // Calculate dynamic Center of Gravity (CoG)
-        let dry_m = _state.dry_mass.value;
-        let prop_m = _state.propellant_mass.value;
+        let dry_m = config.mass.dry_mass.value;
+        let prop_m = state.current_mass.value - dry_m;
         let cg_z = (0.0 * dry_m + (-body_length / 4.0) * prop_m) / (dry_m + prop_m);
 
         // Apply CoG shift to all root Z anchors
@@ -242,8 +242,8 @@ mod tests {
     /// convention used by the physics and controller.
     #[test]
     fn mesh_nose_is_aligned_with_body_z_axis() {
-        let state = get_initial_state();
         let config = get_default_config();
+        let state = get_initial_state(&config);
         let mut mesh = Mesh::default();
         let generator = TheMeshGenerator::default();
 
@@ -281,8 +281,8 @@ mod tests {
 
     #[test]
     fn mesh_total_length_equals_body_length() {
-        let state = get_initial_state();
         let config = get_default_config();
+        let state = get_initial_state(&config);
         let mut mesh = Mesh::default();
         let generator = TheMeshGenerator::default();
 
@@ -312,8 +312,8 @@ mod tests {
 
     #[test]
     fn mesh_maximum_radius_includes_fins() {
-        let state = get_initial_state();
         let config = get_default_config();
+        let state = get_initial_state(&config);
         let mut mesh = Mesh::default();
         let generator = TheMeshGenerator::default();
 
@@ -340,8 +340,8 @@ mod tests {
 
     #[test]
     fn mesh_generates_correct_volume_bounding_box() {
-        let state = get_initial_state();
         let config = get_default_config();
+        let state = get_initial_state(&config);
         let mut mesh = Mesh::default();
         let generator = TheMeshGenerator::default();
 
