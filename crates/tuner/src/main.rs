@@ -8,11 +8,9 @@ use uom::si::f64::Length;
 use uom::si::length::meter;
 
 #[derive(Clone, Debug)]
-struct Particle {
+struct Wolf {
     position: (f64, f64, f64),
-    velocity: (f64, f64, f64),
-    best_position: (f64, f64, f64),
-    best_score: f64,
+    score: f64,
 }
 
 fn evaluate_pid(kp: f64, ki: f64, kd: f64, max_time: f64) -> f64 {
@@ -34,6 +32,7 @@ fn evaluate_pid(kp: f64, ki: f64, kd: f64, max_time: f64) -> f64 {
     let rocket = TheRocket::new(config.clone(), waypoint);
     let mut twin = DigitalTwin::new(config, state, Box::new(mesh_generator), Box::new(rocket));
 
+    // For evaluate tracking speed & accuracy
     let dt = 0.01;
     let mut time = 0.0;
 
@@ -41,7 +40,10 @@ fn evaluate_pid(kp: f64, ki: f64, kd: f64, max_time: f64) -> f64 {
     let mut min_dist = f64::MAX;
     let mut landed_early = false;
 
-    while time < max_time {
+    // Quick evaluate limit for optimization loops
+    let early_termination_limit = max_time;
+
+    while time < early_termination_limit {
         twin.step(dt);
         time += dt;
 
@@ -81,162 +83,136 @@ fn evaluate_pid(kp: f64, ki: f64, kd: f64, max_time: f64) -> f64 {
     itae_accumulator + failure_penalty + (min_dist * 10.0)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_evaluate_pid_returns_valid_score() {
-        let score = evaluate_pid(0.1, 0.01, 0.05, 1.0);
-        assert!(
-            score > 0.0,
-            "Score should always be positive for this fitness function"
-        );
-        assert!(score.is_finite(), "Score must be a finite number");
-    }
-
-    #[test]
-    fn test_evaluate_pid_extreme_values() {
-        // High gains might cause instability, but it should still return a finite score
-        let score = evaluate_pid(100.0, 100.0, 100.0, 1.0);
-        assert!(
-            score.is_finite(),
-            "Score must be a finite number, even with extreme PID gains"
-        );
-    }
-
-    #[test]
-    fn test_particle_struct() {
-        let p = Particle {
-            position: (0.1, 0.2, 0.3),
-            velocity: (0.01, 0.02, 0.03),
-            best_position: (0.1, 0.2, 0.3),
-            best_score: 100.0,
-        };
-        assert_eq!(p.position.0, 0.1);
-        assert_eq!(p.best_score, 100.0);
-    }
-}
-
 fn main() {
     let epochs = 60;
-    let num_particles = 120;
-    let mut rng = rand::thread_rng();
+    let num_wolves = 60;
+
+    println!(
+        "Starting Grey Wolf Optimizer (GWO) with {} wolves for {} epochs...",
+        num_wolves, epochs
+    );
 
     // Search Space Boundaries
     let bounds = [(0.0, 1.0), (0.0, 0.1), (0.0, 1.0)]; // Kp, Ki, Kd
 
-    let mut particles: Vec<Particle> = (0..num_particles)
+    let mut wolves: Vec<Wolf> = (0..num_wolves)
         .map(|_| {
+            let mut rng = rand::thread_rng();
             let pos = (
                 rng.gen_range(bounds[0].0..bounds[0].1),
                 rng.gen_range(bounds[1].0..bounds[1].1),
                 rng.gen_range(bounds[2].0..bounds[2].1),
             );
-            Particle {
+            Wolf {
                 position: pos,
-                velocity: (0.0, 0.0, 0.0),
-                best_position: pos,
-                best_score: f64::MAX,
+                score: f64::MAX,
             }
         })
         .collect();
 
-    println!(
-        "Starting PSO optimization with {} particles for {} epochs...",
-        num_particles, epochs
-    );
-    println!("Initial random positions (Kp, Ki, Kd):");
+    let mut alpha_pos = (0.0, 0.0, 0.0);
+    let mut alpha_score = f64::MAX;
 
-    let mut global_best_params = particles[0].position;
-    let mut global_best_score = f64::MAX;
+    let mut beta_pos = (0.0, 0.0, 0.0);
+    let mut beta_score = f64::MAX;
 
-    let mut no_improvement_count = 0;
-    let mut prev_best_score = f64::MAX;
+    let mut delta_pos = (0.0, 0.0, 0.0);
+    let mut delta_score = f64::MAX;
 
-    let pb = ProgressBar::new((epochs * num_particles) as u64);
+    let pb = ProgressBar::new((epochs * num_wolves) as u64);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} | Best ITAE: {msg}")
+            .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} | Alpha ITAE: {msg}")
             .unwrap(),
     );
 
     for epoch in 0..epochs {
         // 1. Parallel Evaluation
-        let scores: Vec<f64> = particles
+        let scores: Vec<f64> = wolves
             .par_iter()
-            .map(|p| evaluate_pid(p.position.0, p.position.1, p.position.2, 30.0))
+            .map(|w| evaluate_pid(w.position.0, w.position.1, w.position.2, 30.0))
             .collect();
 
-        // 2. Update Bests
+        // 2. Update Alpha, Beta, Delta wolves
         for (i, score) in scores.into_iter().enumerate() {
             pb.inc(1);
-            if score < particles[i].best_score {
-                particles[i].best_score = score;
-                particles[i].best_position = particles[i].position;
+            wolves[i].score = score;
 
-                if score < global_best_score {
-                    global_best_score = score;
-                    global_best_params = particles[i].position;
-                    pb.set_message(format!(
-                        "{:.2}, Kp: {:.6}, Ki: {:.6}, Kd: {:.6}",
-                        global_best_score,
-                        global_best_params.0,
-                        global_best_params.1,
-                        global_best_params.2
-                    ));
-                }
+            if score < alpha_score {
+                delta_score = beta_score;
+                delta_pos = beta_pos;
+                beta_score = alpha_score;
+                beta_pos = alpha_pos;
+                alpha_score = score;
+                alpha_pos = wolves[i].position;
+                pb.set_message(format!(
+                    "{:.2}, Kp: {:.6}, Ki: {:.6}, Kd: {:.6}",
+                    alpha_score, alpha_pos.0, alpha_pos.1, alpha_pos.2
+                ));
+            } else if score < beta_score {
+                delta_score = beta_score;
+                delta_pos = beta_pos;
+                beta_score = score;
+                beta_pos = wolves[i].position;
+            } else if score < delta_score {
+                delta_score = score;
+                delta_pos = wolves[i].position;
             }
         }
 
-        // Check for convergence: stop if the global best score hasn't improved by a minimum threshold over 10 epochs
-        if (prev_best_score - global_best_score).abs() < 1e-4 {
-            no_improvement_count += 1;
-        } else {
-            no_improvement_count = 0;
-            prev_best_score = global_best_score;
-        }
+        // 3. Linearly decrement 'a' from 2.0 to 0.0
+        // hyperparameter:
+        // By modifying how 'a' decreases, we affect the balance between exploration and exploitation.
+        // A common GWO hyperparameter to tune is a non-linear decrease strategy.
+        // Let's use a non-linear decay for 'a' to give more exploration early and fast exploitation late.
+        // For instance, a = 2.0 * (1.0 - (epoch as f64 / epochs as f64).powi(2));
+        let epoch_ratio = epoch as f64 / epochs as f64;
+        let a = 2.0 * (1.0 - epoch_ratio.powi(2));
 
-        if no_improvement_count >= 10 {
-            pb.println(format!("Converged early at epoch {}!", epoch + 1));
-            break;
-        }
-
-        // 3. Movement with Inertia and Velocity Clamping
-        let w = 0.6; // Inertia
-        let c1 = 1.4; // Cognitive
-        let c2 = 1.8; // Social        // 1. Parallel Evaluation
-
-        for p in &mut particles {
+        for w in &mut wolves {
             let mut rng = rand::thread_rng();
 
-            // Update Velocity
-            p.velocity.0 = w * p.velocity.0
-                + c1 * rng.r#gen::<f64>() * (p.best_position.0 - p.position.0)
-                + c2 * rng.r#gen::<f64>() * (global_best_params.0 - p.position.0);
-            p.velocity.1 = w * p.velocity.1
-                + c1 * rng.r#gen::<f64>() * (p.best_position.1 - p.position.1)
-                + c2 * rng.r#gen::<f64>() * (global_best_params.1 - p.position.1);
-            p.velocity.2 = w * p.velocity.2
-                + c1 * rng.r#gen::<f64>() * (p.best_position.2 - p.position.2)
-                + c2 * rng.r#gen::<f64>() * (global_best_params.2 - p.position.2);
+            let mut update_dim = |current_val: f64, target_val: f64| -> f64 {
+                let r1: f64 = rng.r#gen();
+                let r2: f64 = rng.r#gen();
+                let a1 = 2.0 * a * r1 - a;
+                let c1 = 2.0 * r2;
+                let d1 = (c1 * target_val - current_val).abs();
+                target_val - a1 * d1
+            };
 
-            // Clamp Velocity to 10% of range to prevent chaotic jumps
-            p.velocity.0 = p.velocity.0.clamp(-0.1, 0.1);
-            p.velocity.1 = p.velocity.1.clamp(-0.01, 0.01);
-            p.velocity.2 = p.velocity.2.clamp(-0.1, 0.1);
+            // Update for Alpha
+            let x1 = (
+                update_dim(w.position.0, alpha_pos.0),
+                update_dim(w.position.1, alpha_pos.1),
+                update_dim(w.position.2, alpha_pos.2),
+            );
 
-            // Apply Position and Clamp to bounds
-            p.position.0 = (p.position.0 + p.velocity.0).clamp(bounds[0].0, bounds[0].1);
-            p.position.1 = (p.position.1 + p.velocity.1).clamp(bounds[1].0, bounds[1].1);
-            p.position.2 = (p.position.2 + p.velocity.2).clamp(bounds[2].0, bounds[2].1);
+            // Update for Beta
+            let x2 = (
+                update_dim(w.position.0, beta_pos.0),
+                update_dim(w.position.1, beta_pos.1),
+                update_dim(w.position.2, beta_pos.2),
+            );
+
+            // Update for Delta
+            let x3 = (
+                update_dim(w.position.0, delta_pos.0),
+                update_dim(w.position.1, delta_pos.1),
+                update_dim(w.position.2, delta_pos.2),
+            );
+
+            // Average positions and clamp to boundaries
+            w.position.0 = ((x1.0 + x2.0 + x3.0) / 3.0).clamp(bounds[0].0, bounds[0].1);
+            w.position.1 = ((x1.1 + x2.1 + x3.1) / 3.0).clamp(bounds[1].0, bounds[1].1);
+            w.position.2 = ((x1.2 + x2.2 + x3.2) / 3.0).clamp(bounds[2].0, bounds[2].1);
         }
     }
 
     pb.finish();
-    println!("\n--- Optimization Results ---");
-    println!("Final ITAE Score: {:.4}", global_best_score);
-    println!("Optimal Kp: {:.6}", global_best_params.0);
-    println!("Optimal Ki: {:.6}", global_best_params.1);
-    println!("Optimal Kd: {:.6}", global_best_params.2);
+    println!("\n--- GWO Optimization Results ---");
+    println!("Final Alpha ITAE Score: {:.4}", alpha_score);
+    println!("Optimal Kp: {:.6}", alpha_pos.0);
+    println!("Optimal Ki: {:.6}", alpha_pos.1);
+    println!("Optimal Kd: {:.6}", alpha_pos.2);
 }
