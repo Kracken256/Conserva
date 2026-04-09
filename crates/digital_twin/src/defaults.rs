@@ -35,7 +35,7 @@ pub fn get_initial_state() -> MissileState {
         dry_mass: Mass::new::<kilogram>(40.0),
         propellant_mass: Mass::new::<kilogram>(100.0),
         motor_thrust: Force::new::<newton>(0.0),
-        inertia_tensor: Matrix3::identity(),
+        inertia_tensor: Matrix3::new(0.05, 0.0, 0.0, 0.0, 0.05, 0.0, 0.0, 0.0, 0.005),
     }
 }
 

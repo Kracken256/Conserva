@@ -5,10 +5,11 @@ use nalgebra::Vector3;
 pub struct TheMeshGenerator {}
 
 impl MeshGenerator for TheMeshGenerator {
-    fn generate(&self, _state: &MissileState, _config: &MissileConfig, mesh: &mut Mesh) {
-        let radius = 1.5;
-        let sectors = 1024;
-        let stacks = 1024;
+    fn generate(&self, _state: &MissileState, config: &MissileConfig, mesh: &mut Mesh) {
+        use uom::si::length::meter;
+        let radius = config.diameter.get::<meter>() / 2.0;
+        let sectors = 16;
+        let stacks = 16;
 
         mesh.vertices.clear();
         mesh.indices.clear();
