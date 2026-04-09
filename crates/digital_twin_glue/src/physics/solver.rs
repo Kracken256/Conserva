@@ -109,7 +109,7 @@ impl AeroSolver {
                 length_ref,
                 freestream_mach,
                 // Resulting C_p on the windward side
-                |cos_theta, _| (cos_theta * 2.0) / f64x4::splat(pg_beta),
+                |cos_theta, _| (cos_theta * 2.0) / f64x8::splat(pg_beta),
             )
         } else if freestream_mach < 1.2 {
             // == Transonic Regime (0.8 <= Mach < 1.2) ==
@@ -133,7 +133,7 @@ impl AeroSolver {
                 dyn_viscosity,
                 length_ref,
                 freestream_mach,
-                |cos_theta, _| cos_theta * f64x4::splat(cp_blend),
+                |cos_theta, _| cos_theta * f64x8::splat(cp_blend),
             )
         } else if freestream_mach < 5.0 {
             // == Supersonic Regime (1.2 <= Mach < 5.0) ==
@@ -150,7 +150,7 @@ impl AeroSolver {
                 dyn_viscosity,
                 length_ref,
                 freestream_mach,
-                |cos_theta, _| (cos_theta * 2.0) / f64x4::splat(beta),
+                |cos_theta, _| (cos_theta * 2.0) / f64x8::splat(beta),
             )
         } else {
             // == Hypersonic Regime (Mach >= 5.0) ==
@@ -173,16 +173,16 @@ impl AeroSolver {
                 freestream_mach,
                 move |cos_theta, _| {
                     // Newtonian impact approximation: 2 * sin^2(theta_flow)
-                    let cp_newtonian = cos_theta * cos_theta * f64x4::splat(2.0);
-                    let cp_ackeret = (cos_theta * 2.0) / f64x4::splat(beta_5);
-                    cp_ackeret * f64x4::splat(1.0 - blend) + cp_newtonian * f64x4::splat(blend)
+                    let cp_newtonian = cos_theta * cos_theta * f64x8::splat(2.0);
+                    let cp_ackeret = (cos_theta * 2.0) / f64x8::splat(beta_5);
+                    cp_ackeret * f64x8::splat(1.0 - blend) + cp_newtonian * f64x8::splat(blend)
                 },
             )
         }
     }
 }
 
-use wide::{CmpGe, CmpGt, CmpLt, f64x4};
+use wide::{CmpGe, CmpGt, CmpLt, f64x8};
 
 impl AeroSolver {
     /// Iterates through all triangles on the given 3D `mesh`, computes the
@@ -215,7 +215,7 @@ impl AeroSolver {
         calc_windward_cp: F,
     ) -> SolverOutput
     where
-        F: Fn(f64x4, f64x4) -> f64x4,
+        F: Fn(f64x8, f64x8) -> f64x8,
     {
         let mut total_force = Vector3::zeros();
         let mut total_torque = Vector3::zeros();
@@ -232,46 +232,46 @@ impl AeroSolver {
         };
 
         let n_faces = mesh.faces.area.len();
-        let chunks = n_faces / 4;
-        let remainder = n_faces % 4;
+        let chunks = n_faces / 8;
+        let remainder = n_faces % 8;
 
-        let mut force_x = f64x4::splat(0.0);
-        let mut force_y = f64x4::splat(0.0);
-        let mut force_z = f64x4::splat(0.0);
+        let mut force_x = f64x8::splat(0.0);
+        let mut force_y = f64x8::splat(0.0);
+        let mut force_z = f64x8::splat(0.0);
 
-        let mut torque_x = f64x4::splat(0.0);
-        let mut torque_y = f64x4::splat(0.0);
-        let mut torque_z = f64x4::splat(0.0);
+        let mut torque_x = f64x8::splat(0.0);
+        let mut torque_y = f64x8::splat(0.0);
+        let mut torque_z = f64x8::splat(0.0);
 
-        let v_inf_x = f64x4::splat(v_inf.x);
-        let v_inf_y = f64x4::splat(v_inf.y);
-        let v_inf_z = f64x4::splat(v_inf.z);
+        let v_inf_x = f64x8::splat(v_inf.x);
+        let v_inf_y = f64x8::splat(v_inf.y);
+        let v_inf_z = f64x8::splat(v_inf.z);
 
-        let w_x = f64x4::splat(w.x);
-        let w_y = f64x4::splat(w.y);
-        let w_z = f64x4::splat(w.z);
+        let w_x = f64x8::splat(w.x);
+        let w_y = f64x8::splat(w.y);
+        let w_z = f64x8::splat(w.z);
 
-        let cm_x = f64x4::splat(cm.x);
-        let cm_y = f64x4::splat(cm.y);
-        let cm_z = f64x4::splat(cm.z);
+        let cm_x = f64x8::splat(cm.x);
+        let cm_y = f64x8::splat(cm.y);
+        let cm_z = f64x8::splat(cm.z);
 
-        let leeward_cp_splat = f64x4::splat(leeward_cp);
-        let speed_of_sound_splat = f64x4::splat(speed_of_sound);
-        let air_density_splat = f64x4::splat(air_density);
-        let length_ref_splat = f64x4::splat(length_ref);
-        let dyn_viscosity_splat = f64x4::splat(dyn_viscosity);
+        let leeward_cp_splat = f64x8::splat(leeward_cp);
+        let speed_of_sound_splat = f64x8::splat(speed_of_sound);
+        let air_density_splat = f64x8::splat(air_density);
+        let length_ref_splat = f64x8::splat(length_ref);
+        let dyn_viscosity_splat = f64x8::splat(dyn_viscosity);
 
         // Helper for vector length/norm
         let norm3 =
-            |x: f64x4, y: f64x4, z: f64x4| -> f64x4 { ((x * x) + (y * y) + (z * z)).sqrt() };
+            |x: f64x8, y: f64x8, z: f64x8| -> f64x8 { ((x * x) + (y * y) + (z * z)).sqrt() };
 
-        let cross3 = |ax: f64x4,
-                      ay: f64x4,
-                      az: f64x4,
-                      bx: f64x4,
-                      by: f64x4,
-                      bz: f64x4|
-         -> (f64x4, f64x4, f64x4) {
+        let cross3 = |ax: f64x8,
+                      ay: f64x8,
+                      az: f64x8,
+                      bx: f64x8,
+                      by: f64x8,
+                      bz: f64x8|
+         -> (f64x8, f64x8, f64x8) {
             (
                 (ay * bz) - (az * by),
                 (az * bx) - (ax * bz),
@@ -280,39 +280,43 @@ impl AeroSolver {
         };
 
         for c in 0..chunks {
-            let offset = c * 4;
+            let offset = c * 8;
 
             let area_arr = [
                 mesh.faces.area[offset],
                 mesh.faces.area[offset + 1],
                 mesh.faces.area[offset + 2],
                 mesh.faces.area[offset + 3],
+                mesh.faces.area[offset + 4],
+                mesh.faces.area[offset + 5],
+                mesh.faces.area[offset + 6],
+                mesh.faces.area[offset + 7],
             ];
-            let area = f64x4::new(area_arr);
+            let area = f64x8::new(area_arr);
 
             // Early bailout for degenerate
-            let area_mask = area.simd_ge(f64x4::splat(1e-8));
-            if area_mask.to_array() == [0.0, 0.0, 0.0, 0.0] {
+            let area_mask = area.simd_ge(f64x8::splat(1e-8));
+            if area_mask.to_array() == [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] {
                 continue;
             }
 
-            let cx = f64x4::new([
-                mesh.faces.centroid_x[offset],
-                mesh.faces.centroid_x[offset + 1],
-                mesh.faces.centroid_x[offset + 2],
-                mesh.faces.centroid_x[offset + 3],
+            let cx = f64x8::new([
+                mesh.faces.centroid_x[offset], mesh.faces.centroid_x[offset+1],
+                mesh.faces.centroid_x[offset+2], mesh.faces.centroid_x[offset+3],
+                mesh.faces.centroid_x[offset+4], mesh.faces.centroid_x[offset+5],
+                mesh.faces.centroid_x[offset+6], mesh.faces.centroid_x[offset+7]
             ]);
-            let cy = f64x4::new([
-                mesh.faces.centroid_y[offset],
-                mesh.faces.centroid_y[offset + 1],
-                mesh.faces.centroid_y[offset + 2],
-                mesh.faces.centroid_y[offset + 3],
+            let cy = f64x8::new([
+                mesh.faces.centroid_y[offset], mesh.faces.centroid_y[offset+1],
+                mesh.faces.centroid_y[offset+2], mesh.faces.centroid_y[offset+3],
+                mesh.faces.centroid_y[offset+4], mesh.faces.centroid_y[offset+5],
+                mesh.faces.centroid_y[offset+6], mesh.faces.centroid_y[offset+7]
             ]);
-            let cz = f64x4::new([
-                mesh.faces.centroid_z[offset],
-                mesh.faces.centroid_z[offset + 1],
-                mesh.faces.centroid_z[offset + 2],
-                mesh.faces.centroid_z[offset + 3],
+            let cz = f64x8::new([
+                mesh.faces.centroid_z[offset], mesh.faces.centroid_z[offset+1],
+                mesh.faces.centroid_z[offset+2], mesh.faces.centroid_z[offset+3],
+                mesh.faces.centroid_z[offset+4], mesh.faces.centroid_z[offset+5],
+                mesh.faces.centroid_z[offset+6], mesh.faces.centroid_z[offset+7]
             ]);
 
             let rx = cx - cm_x;
@@ -327,74 +331,74 @@ impl AeroSolver {
             let v_mag = norm3(v_local_x, v_local_y, v_local_z);
 
             // Early bailout for stagnant points
-            let v_mag_mask = v_mag.simd_ge(f64x4::splat(1e-3));
+            let v_mag_mask = v_mag.simd_ge(f64x8::splat(1e-3));
             let valid_mask = area_mask & v_mag_mask;
             // If valid_mask is all zeros, early bailout!
-            if valid_mask.to_array() == [0.0, 0.0, 0.0, 0.0] {
+            if valid_mask.to_array() == [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] {
                 continue;
             }
 
-            let safe_v_mag = v_mag.max(f64x4::splat(1e-3));
+            let safe_v_mag = v_mag.max(f64x8::splat(1e-3));
             let local_mach = safe_v_mag / speed_of_sound_splat;
 
             // v_dir = -v_local / v_mag
-            let v_dir_x = (f64x4::splat(0.0) - v_local_x) / safe_v_mag;
-            let v_dir_y = (f64x4::splat(0.0) - v_local_y) / safe_v_mag;
-            let v_dir_z = (f64x4::splat(0.0) - v_local_z) / safe_v_mag;
+            let v_dir_x = (f64x8::splat(0.0) - v_local_x) / safe_v_mag;
+            let v_dir_y = (f64x8::splat(0.0) - v_local_y) / safe_v_mag;
+            let v_dir_z = (f64x8::splat(0.0) - v_local_z) / safe_v_mag;
 
-            let nx = f64x4::new([
-                mesh.faces.normal_x[offset],
-                mesh.faces.normal_x[offset + 1],
-                mesh.faces.normal_x[offset + 2],
-                mesh.faces.normal_x[offset + 3],
+            let nx = f64x8::new([
+                mesh.faces.normal_x[offset], mesh.faces.normal_x[offset+1],
+                mesh.faces.normal_x[offset+2], mesh.faces.normal_x[offset+3],
+                mesh.faces.normal_x[offset+4], mesh.faces.normal_x[offset+5],
+                mesh.faces.normal_x[offset+6], mesh.faces.normal_x[offset+7]
             ]);
-            let ny = f64x4::new([
-                mesh.faces.normal_y[offset],
-                mesh.faces.normal_y[offset + 1],
-                mesh.faces.normal_y[offset + 2],
-                mesh.faces.normal_y[offset + 3],
+            let ny = f64x8::new([
+                mesh.faces.normal_y[offset], mesh.faces.normal_y[offset+1],
+                mesh.faces.normal_y[offset+2], mesh.faces.normal_y[offset+3],
+                mesh.faces.normal_y[offset+4], mesh.faces.normal_y[offset+5],
+                mesh.faces.normal_y[offset+6], mesh.faces.normal_y[offset+7]
             ]);
-            let nz = f64x4::new([
-                mesh.faces.normal_z[offset],
-                mesh.faces.normal_z[offset + 1],
-                mesh.faces.normal_z[offset + 2],
-                mesh.faces.normal_z[offset + 3],
+            let nz = f64x8::new([
+                mesh.faces.normal_z[offset], mesh.faces.normal_z[offset+1],
+                mesh.faces.normal_z[offset+2], mesh.faces.normal_z[offset+3],
+                mesh.faces.normal_z[offset+4], mesh.faces.normal_z[offset+5],
+                mesh.faces.normal_z[offset+6], mesh.faces.normal_z[offset+7]
             ]);
 
             let cos_theta = (nx * v_dir_x) + (ny * v_dir_y) + (nz * v_dir_z);
 
-            let windward_mask = cos_theta.simd_lt(f64x4::splat(0.0));
-            // calc_windward_cp returns f64x4
+            let windward_mask = cos_theta.simd_lt(f64x8::splat(0.0));
+            // calc_windward_cp returns f64x8
             let cp_windward = calc_windward_cp(cos_theta.abs(), local_mach);
             let c_p = windward_mask.blend(cp_windward, leeward_cp_splat);
 
             let reynolds =
                 (air_density_splat * safe_v_mag * length_ref_splat) / dyn_viscosity_splat;
-            let turbulent_mask = reynolds.simd_gt(f64x4::splat(1e5));
+            let turbulent_mask = reynolds.simd_gt(f64x8::splat(1e5));
 
-            let safe_reynolds = reynolds.max(f64x4::splat(1e-5));
+            let safe_reynolds = reynolds.max(f64x8::splat(1e-5));
 
-            // Pow logic: x^-0.2 is the same as 1.0 / x^0.2. wide's powf is not natively supported for f64x4,
+            // Pow logic: x^-0.2 is the same as 1.0 / x^0.2. wide's powf is not natively supported for f64x8,
             // but we can compute it manually or use scalars if wide doesn't have it.
-            // Wait, wide doesn't have pow/powf on f64x4! Let's do it using scalar array for this specific operation
+            // Wait, wide doesn't have pow/powf on f64x8! Let's do it using scalar array for this specific operation
             let safe_rey_arr = safe_reynolds.to_array();
             let cp_turb_arr = [
-                0.074 / safe_rey_arr[0].powf(0.2),
-                0.074 / safe_rey_arr[1].powf(0.2),
-                0.074 / safe_rey_arr[2].powf(0.2),
-                0.074 / safe_rey_arr[3].powf(0.2),
+                0.074 / safe_rey_arr[0].powf(0.2), 0.074 / safe_rey_arr[1].powf(0.2),
+                0.074 / safe_rey_arr[2].powf(0.2), 0.074 / safe_rey_arr[3].powf(0.2),
+                0.074 / safe_rey_arr[4].powf(0.2), 0.074 / safe_rey_arr[5].powf(0.2),
+                0.074 / safe_rey_arr[6].powf(0.2), 0.074 / safe_rey_arr[7].powf(0.2)
             ];
-            let cp_turb = f64x4::new(cp_turb_arr);
+            let cp_turb = f64x8::new(cp_turb_arr);
 
-            let c_f = turbulent_mask.blend(cp_turb, f64x4::splat(0.002));
+            let c_f = turbulent_mask.blend(cp_turb, f64x8::splat(0.002));
 
-            let q = f64x4::splat(0.5) * air_density_splat * safe_v_mag * safe_v_mag;
+            let q = f64x8::splat(0.5) * air_density_splat * safe_v_mag * safe_v_mag;
 
             // normal force
             let fn_mag = q * c_p * area;
-            let fn_x = (f64x4::splat(0.0) - nx) * fn_mag;
-            let fn_y = (f64x4::splat(0.0) - ny) * fn_mag;
-            let fn_z = (f64x4::splat(0.0) - nz) * fn_mag;
+            let fn_x = (f64x8::splat(0.0) - nx) * fn_mag;
+            let fn_y = (f64x8::splat(0.0) - ny) * fn_mag;
+            let fn_z = (f64x8::splat(0.0) - nz) * fn_mag;
 
             // tangent velocity
             let vt_x = v_dir_x - (nx * cos_theta);
@@ -402,23 +406,23 @@ impl AeroSolver {
             let vt_z = v_dir_z - (nz * cos_theta);
             let vt_mag = norm3(vt_x, vt_y, vt_z);
 
-            let tangent_mask = vt_mag.simd_gt(f64x4::splat(1e-6));
-            let safe_vt_mag = vt_mag.max(f64x4::splat(1e-6));
+            let tangent_mask = vt_mag.simd_gt(f64x8::splat(1e-6));
+            let safe_vt_mag = vt_mag.max(f64x8::splat(1e-6));
             let tangent_dir_x = vt_x / safe_vt_mag;
             let tangent_dir_y = vt_y / safe_vt_mag;
             let tangent_dir_z = vt_z / safe_vt_mag;
 
             let ft_mag = q * c_f * area;
             // Blend tangent force based on mask
-            let ft_x = tangent_mask.blend(tangent_dir_x * ft_mag, f64x4::splat(0.0));
-            let ft_y = tangent_mask.blend(tangent_dir_y * ft_mag, f64x4::splat(0.0));
-            let ft_z = tangent_mask.blend(tangent_dir_z * ft_mag, f64x4::splat(0.0));
+            let ft_x = tangent_mask.blend(tangent_dir_x * ft_mag, f64x8::splat(0.0));
+            let ft_y = tangent_mask.blend(tangent_dir_y * ft_mag, f64x8::splat(0.0));
+            let ft_z = tangent_mask.blend(tangent_dir_z * ft_mag, f64x8::splat(0.0));
 
             // Total elemental force
             // Apply valid mask to ignore degenerate/stagnant completely!
-            let f_x = valid_mask.blend(fn_x + ft_x, f64x4::splat(0.0));
-            let f_y = valid_mask.blend(fn_y + ft_y, f64x4::splat(0.0));
-            let f_z = valid_mask.blend(fn_z + ft_z, f64x4::splat(0.0));
+            let f_x = valid_mask.blend(fn_x + ft_x, f64x8::splat(0.0));
+            let f_y = valid_mask.blend(fn_y + ft_y, f64x8::splat(0.0));
+            let f_z = valid_mask.blend(fn_z + ft_z, f64x8::splat(0.0));
 
             force_x = force_x + f_x;
             force_y = force_y + f_y;
@@ -438,13 +442,13 @@ impl AeroSolver {
         let t_arr_y = torque_y.to_array();
         let t_arr_z = torque_z.to_array();
 
-        total_force.x += f_arr_x[0] + f_arr_x[1] + f_arr_x[2] + f_arr_x[3];
-        total_force.y += f_arr_y[0] + f_arr_y[1] + f_arr_y[2] + f_arr_y[3];
-        total_force.z += f_arr_z[0] + f_arr_z[1] + f_arr_z[2] + f_arr_z[3];
+        total_force.x += f_arr_x[0] + f_arr_x[1] + f_arr_x[2] + f_arr_x[3] + f_arr_x[4] + f_arr_x[5] + f_arr_x[6] + f_arr_x[7];
+        total_force.y += f_arr_y[0] + f_arr_y[1] + f_arr_y[2] + f_arr_y[3] + f_arr_y[4] + f_arr_y[5] + f_arr_y[6] + f_arr_y[7];
+        total_force.z += f_arr_z[0] + f_arr_z[1] + f_arr_z[2] + f_arr_z[3] + f_arr_z[4] + f_arr_z[5] + f_arr_z[6] + f_arr_z[7];
 
-        total_torque.x += t_arr_x[0] + t_arr_x[1] + t_arr_x[2] + t_arr_x[3];
-        total_torque.y += t_arr_y[0] + t_arr_y[1] + t_arr_y[2] + t_arr_y[3];
-        total_torque.z += t_arr_z[0] + t_arr_z[1] + t_arr_z[2] + t_arr_z[3];
+        total_torque.x += t_arr_x[0] + t_arr_x[1] + t_arr_x[2] + t_arr_x[3] + t_arr_x[4] + t_arr_x[5] + t_arr_x[6] + t_arr_x[7];
+        total_torque.y += t_arr_y[0] + t_arr_y[1] + t_arr_y[2] + t_arr_y[3] + t_arr_y[4] + t_arr_y[5] + t_arr_y[6] + t_arr_y[7];
+        total_torque.z += t_arr_z[0] + t_arr_z[1] + t_arr_z[2] + t_arr_z[3] + t_arr_z[4] + t_arr_z[5] + t_arr_z[6] + t_arr_z[7];
 
         // Do the scalar loop for the remainder elements
         let rem_start = n_faces - remainder;
@@ -475,9 +479,9 @@ impl AeroSolver {
             let d = -loc_v / vm;
             let cdt = n_scalar.dot(&d);
 
-            // Wrap scalar variables into f64x4 arrays to pass to calc_windward_cp!
+            // Wrap scalar variables into f64x8 arrays to pass to calc_windward_cp!
             // Because calc_windward_cp expects SIMD arguments!
-            let cw_arr = calc_windward_cp(f64x4::splat(cdt.abs()), f64x4::splat(lmach)).to_array();
+            let cw_arr = calc_windward_cp(f64x8::splat(cdt.abs()), f64x8::splat(lmach)).to_array();
             let cp_w = cw_arr[0];
             let cp = if cdt < 0.0 { cp_w } else { leeward_cp };
 
@@ -686,26 +690,26 @@ mod tests {
         let n = Vector3::new(0.0, 0.0, 1.0);
         let c = Vector3::zeros();
 
-        // 4 faces (uses exactly 1 SIMD chunk)
-        let mesh4 = create_faces(&[n, n, n, n], &[1.0, 1.0, 1.0, 1.0], &[c, c, c, c]);
-        let out4 = solver.calculate_forces(&mesh4, &state, 1.225, sos, 1.8e-5);
+        // 8 faces (uses exactly 1 SIMD chunk)
+        let mesh8 = create_faces(&[n, n, n, n, n, n, n, n], &[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], &[c, c, c, c, c, c, c, c]);
+        let out8 = solver.calculate_forces(&mesh8, &state, 1.225, sos, 1.8e-5);
 
-        // 3 faces (uses exactly 3 scalar remainder, 0 SIMD)
-        let mesh3 = create_faces(&[n, n, n], &[1.0, 1.0, 1.0], &[c, c, c]);
-        let out3 = solver.calculate_forces(&mesh3, &state, 1.225, sos, 1.8e-5);
-
-        // 7 faces (1 SIMD chunk + 3 scalar remainder)
-        let mesh7 = create_faces(
-            &[n, n, n, n, n, n, n],
-            &[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            &[c, c, c, c, c, c, c],
-        );
+        // 7 faces (uses exactly 7 scalar remainder, 0 SIMD)
+        let mesh7 = create_faces(&[n, n, n, n, n, n, n], &[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], &[c, c, c, c, c, c, c]);
         let out7 = solver.calculate_forces(&mesh7, &state, 1.225, sos, 1.8e-5);
 
+        // 15 faces (1 SIMD chunk + 7 scalar remainder)
+        let mesh15 = create_faces(
+            &[n, n, n, n, n, n, n, n, n, n, n, n, n, n, n],
+            &[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            &[c, c, c, c, c, c, c, c, c, c, c, c, c, c, c],
+        );
+        let out15 = solver.calculate_forces(&mesh15, &state, 1.225, sos, 1.8e-5);
+
         // We know that exactly proportional elements should yield proportional additive forces.
-        let force_per_face = out4.force / 4.0;
-        assert_vec3_eq(out3.force, force_per_face * 3.0, 1e-2);
+        let force_per_face = out8.force / 8.0;
         assert_vec3_eq(out7.force, force_per_face * 7.0, 1e-2);
+        assert_vec3_eq(out15.force, force_per_face * 15.0, 1e-2);
     }
 
     #[test]
