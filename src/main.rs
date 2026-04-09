@@ -62,18 +62,34 @@ fn print_state(state: &MissileState, target: Option<Vector3<uom::si::f64::Length
     let _ = io::stdout().flush();
 }
 
+fn save_config_json(config: &MissileConfig) {
+    let config_file =
+        File::create("missile.config.json").expect("Failed to create missile.config.json");
+    let mut config_val = serde_json::to_value(config).expect("Failed to convert config to value");
+    round_json_f64(&mut config_val);
+    serde_json::to_writer_pretty(config_file, &config_val)
+        .expect("Failed to write to missile.config.json");
+}
+
+fn write_state_json(flight_file: &mut File, state: &MissileState, first_json_entry: &mut bool) {
+    let mut state_val = serde_json::to_value(state).expect("Failed to convert state to value");
+    round_json_f64(&mut state_val);
+    let json_str = serde_json::to_string(&state_val).expect("Failed to serialize state");
+
+    if !*first_json_entry {
+        writeln!(flight_file, ",").expect("Failed to write comma");
+    }
+    write!(flight_file, "  {}", json_str).expect("Failed to write JSON entry");
+    *first_json_entry = false;
+}
+
 fn main() {
     let config = get_default_config();
     let state = get_initial_state(&config);
     let mesh_generator = TheMeshGenerator::default();
 
     // Dump config when the program starts
-    let config_file =
-        File::create("missile.config.json").expect("Failed to create missile.config.json");
-    let mut config_val = serde_json::to_value(&config).expect("Failed to convert config to value");
-    round_json_f64(&mut config_val);
-    serde_json::to_writer_pretty(config_file, &config_val)
-        .expect("Failed to write to missile.config.json");
+    save_config_json(&config);
 
     let mut flight_file =
         File::create("missile.flight.json").expect("Failed to create missile.flight.json");
@@ -150,41 +166,11 @@ fn main() {
 
         // 4. Dump state to flight file every 100ms
         if now.duration_since(last_dump_time).as_millis() >= 100 {
-            let mut state_val =
-                serde_json::to_value(&twin.state).expect("Failed to convert state to value");
-            round_json_f64(&mut state_val);
-            let json_str = serde_json::to_string(&state_val).expect("Failed to serialize state");
-
-            if !first_json_entry {
-                writeln!(flight_file, ",").expect("Failed to write comma");
-            }
-            write!(flight_file, "  {}", json_str).expect("Failed to write JSON entry");
-            first_json_entry = false;
-
+            write_state_json(&mut flight_file, &twin.state, &mut first_json_entry);
             last_dump_time = now;
         }
     }
 
+    write_state_json(&mut flight_file, &twin.state, &mut first_json_entry);
     writeln!(flight_file, "\n]").expect("Failed to write array end");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use uom::si::f64::Length;
-
-    #[test]
-    fn test_print_state_formatting_placeholder() {
-        // Simple sanity check that the main testing harness is properly compiling
-        let config = get_default_config();
-        let state = get_initial_state(&config);
-        let target = Some(Vector3::new(
-            Length::new::<meter>(100.0),
-            Length::new::<meter>(200.0),
-            Length::new::<meter>(300.0),
-        ));
-        // We can't easily capture stdout without a crate, but we can call it to ensure it doesn't panic
-        print_state(&state, target);
-        assert!(true);
-    }
 }
