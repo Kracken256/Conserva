@@ -195,8 +195,38 @@ if __name__ == '__main__':
         ux, uy, uz = pos[0], pos[2], pos[1]
         rocket.position = (ux, uy, uz)
 
+        # --- Orientation mapping from Rust body frame to Ursina world ---
+        # Rust:
+        #   - Z-up world
+        #   - Rocket body forward axis = +Z
+        # Ursina/Panda3D:
+        #   - Y-up, forward = +Z
+        # We avoid hand-converting quaternion components and instead:
+        #   1. Use the Rust quaternion to rotate body basis vectors into Rust world
+        #   2. Remap those world vectors into Ursina coordinates
+        #   3. Use lookAt(forward, up) so the visual rocket matches the sim exactly.
+
         i, j, k, w = state_to_render['ori']
-        rocket.quaternion = Quat(w, i, j, k)
+        q_rust = Quat(w, i, j, k)
+
+        # Body-frame basis vectors in Rust
+        nose_body_rust = Vec3(0, 0, 1)  # +Z forward (rocket nose)
+        up_body_rust = Vec3(0, 1, 0)    # +Y up (toward fins/"roof")
+
+        # Rotate them into Rust world frame
+        nose_world_rust = q_rust.xform(nose_body_rust)
+        up_world_rust = q_rust.xform(up_body_rust)
+
+        # Map Rust world (x, y, z) -> Ursina (x, z, y)
+        def rust_to_ursina(v):
+            return Vec3(v.x, v.z, v.y)
+
+        nose_u = rust_to_ursina(nose_world_rust)
+        up_u = rust_to_ursina(up_world_rust)
+
+        # Force the visual model's +Z axis (nose) to align with the
+        # physics forward vector, preserving roll via up_u.
+        rocket.lookAt(rocket.position + nose_u, up_u)
 
         vel = state_to_render['vel']
 
