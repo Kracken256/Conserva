@@ -246,9 +246,8 @@ impl TheSolver {
 
             let local_mach = v_mag / speed_of_sound;
 
-            // Form a directional unit vector aligned against the prevailing flow
-            let v_dir = v_local / v_mag;
-
+            // The air flow direction is the opposite of the body's local geometric velocity
+            let v_dir = -v_local / v_mag;
             // Calculate incidence angle alignment metric
             // Note: because normals point outward, a negative dot product indicates
             // the airflow is striking the face directly (windward side).
