@@ -15,7 +15,7 @@ struct Particle {
     best_score: f64,
 }
 
-fn evaluate_pid(kp: f64, ki: f64, kd: f64) -> f64 {
+fn evaluate_pid(kp: f64, ki: f64, kd: f64, max_time: f64) -> f64 {
     let mut config = get_default_config();
     // Apply tuned parameters to both axes for symmetry in this test
     config.pitch_pid_kp = kp;
@@ -34,7 +34,6 @@ fn evaluate_pid(kp: f64, ki: f64, kd: f64) -> f64 {
     let rocket = TheRocket::new(config.clone(), waypoint);
     let mut twin = DigitalTwin::new(config, state, Box::new(mesh_generator), Box::new(rocket));
 
-    let max_time = 30.0;
     let dt = 0.01;
     let mut time = 0.0;
 
@@ -82,6 +81,43 @@ fn evaluate_pid(kp: f64, ki: f64, kd: f64) -> f64 {
     itae_accumulator + failure_penalty + (min_dist * 10.0)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_evaluate_pid_returns_valid_score() {
+        let score = evaluate_pid(0.1, 0.01, 0.05, 1.0);
+        assert!(
+            score > 0.0,
+            "Score should always be positive for this fitness function"
+        );
+        assert!(score.is_finite(), "Score must be a finite number");
+    }
+
+    #[test]
+    fn test_evaluate_pid_extreme_values() {
+        // High gains might cause instability, but it should still return a finite score
+        let score = evaluate_pid(100.0, 100.0, 100.0, 1.0);
+        assert!(
+            score.is_finite(),
+            "Score must be a finite number, even with extreme PID gains"
+        );
+    }
+
+    #[test]
+    fn test_particle_struct() {
+        let p = Particle {
+            position: (0.1, 0.2, 0.3),
+            velocity: (0.01, 0.02, 0.03),
+            best_position: (0.1, 0.2, 0.3),
+            best_score: 100.0,
+        };
+        assert_eq!(p.position.0, 0.1);
+        assert_eq!(p.best_score, 100.0);
+    }
+}
+
 fn main() {
     let epochs = 60;
     let num_particles = 120;
@@ -123,7 +159,7 @@ fn main() {
         // 1. Parallel Evaluation
         let scores: Vec<f64> = particles
             .par_iter()
-            .map(|p| evaluate_pid(p.position.0, p.position.1, p.position.2))
+            .map(|p| evaluate_pid(p.position.0, p.position.1, p.position.2, 30.0))
             .collect();
 
         // 2. Update Bests

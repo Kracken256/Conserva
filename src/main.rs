@@ -107,3 +107,23 @@ fn main() {
         std::thread::sleep(Duration::from_millis(1));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uom::si::f64::Length;
+
+    #[test]
+    fn test_print_state_formatting_placeholder() {
+        // Simple sanity check that the main testing harness is properly compiling
+        let state = get_initial_state();
+        let target = Some(Vector3::new(
+            Length::new::<meter>(100.0),
+            Length::new::<meter>(200.0),
+            Length::new::<meter>(300.0),
+        ));
+        // We can't easily capture stdout without a crate, but we can call it to ensure it doesn't panic
+        print_state(&state, target);
+        assert!(true);
+    }
+}

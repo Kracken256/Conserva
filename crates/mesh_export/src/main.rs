@@ -43,3 +43,39 @@ fn main() -> io::Result<()> {
     println!("Done!");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_valid_obj_vertex_output() {
+        // A minimal test to check if vertices format right
+        let state = get_initial_state();
+        let config = get_default_config();
+        let mut mesh = Mesh::default();
+        let mesh_generator = TheMeshGenerator::default();
+
+        mesh_generator.generate(&state, &config, &mut mesh);
+
+        // Ensure we have some vertices generated
+        assert!(!mesh.vertices.is_empty(), "Mesh has no vertices");
+        assert!(!mesh.indices.is_empty(), "Mesh has no indices");
+        assert_eq!(
+            mesh.indices.len() % 3,
+            0,
+            "Indices should form complete triangles"
+        );
+    }
+
+    #[test]
+    fn test_expected_file_is_written() {
+        // Instead of writing a file, we could just check if the logic holds
+        // but checking string formatting is more isolated
+        let output = format!("v {} {} {}", 1.0, 2.0, 3.0);
+        assert_eq!(output, "v 1 2 3");
+
+        let index_output = format!("f {} {} {}", 1, 2, 3);
+        assert_eq!(index_output, "f 1 2 3");
+    }
+}

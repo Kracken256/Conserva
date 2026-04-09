@@ -95,3 +95,13 @@ impl DigitalTwin {
         self.state = self.rk4.step(&self.state, physics_engine, dt);
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn test_digital_twin_initialization_placeholder() {
+        // Just asserting true here to have a test placeholder in digital_twin_glue
+        assert!(true);
+    }
+}

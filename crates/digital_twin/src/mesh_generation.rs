@@ -278,4 +278,114 @@ mod tests {
         assert!(avg_x.abs() < 1e-3, "nose tip x not near zero: {}", avg_x);
         assert!(avg_y.abs() < 1e-3, "nose tip y not near zero: {}", avg_y);
     }
+
+    #[test]
+    fn mesh_total_length_equals_body_length() {
+        let state = get_initial_state();
+        let config = get_default_config();
+        let mut mesh = Mesh::default();
+        let generator = TheMeshGenerator::default();
+
+        generator.generate(&state, &config, &mut mesh);
+
+        let max_z = mesh
+            .vertices
+            .iter()
+            .map(|v| v.z)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let min_z = mesh
+            .vertices
+            .iter()
+            .map(|v| v.z)
+            .fold(f64::INFINITY, f64::min);
+        let calculated_length = max_z - min_z;
+        let expected_length = config.body_length.value;
+
+        // Allow a tiny floating-point margin
+        assert!(
+            (calculated_length - expected_length).abs() < 1e-6,
+            "Mesh length {} does not match expected body length {}",
+            calculated_length,
+            expected_length
+        );
+    }
+
+    #[test]
+    fn mesh_maximum_radius_includes_fins() {
+        let state = get_initial_state();
+        let config = get_default_config();
+        let mut mesh = Mesh::default();
+        let generator = TheMeshGenerator::default();
+
+        generator.generate(&state, &config, &mut mesh);
+
+        // Find max distance from Z-axis
+        let max_radius = mesh
+            .vertices
+            .iter()
+            .map(|v| (v.x * v.x + v.y * v.y).sqrt())
+            .fold(f64::NEG_INFINITY, f64::max);
+
+        let expected_body_radius = config.diameter.value / 2.0;
+        let expected_span = expected_body_radius * 3.0;
+        let expected_max_radius = expected_body_radius + expected_span;
+
+        assert!(
+            (max_radius - expected_max_radius).abs() < 1e-2,
+            "Max radius {} does not match expected body + fin span {}",
+            max_radius,
+            expected_max_radius
+        );
+    }
+
+    #[test]
+    fn mesh_generates_correct_volume_bounding_box() {
+        let state = get_initial_state();
+        let config = get_default_config();
+        let mut mesh = Mesh::default();
+        let generator = TheMeshGenerator::default();
+
+        generator.generate(&state, &config, &mut mesh);
+
+        let max_x = mesh
+            .vertices
+            .iter()
+            .map(|v| v.x)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let min_x = mesh
+            .vertices
+            .iter()
+            .map(|v| v.x)
+            .fold(f64::INFINITY, f64::min);
+        let max_y = mesh
+            .vertices
+            .iter()
+            .map(|v| v.y)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let min_y = mesh
+            .vertices
+            .iter()
+            .map(|v| v.y)
+            .fold(f64::INFINITY, f64::min);
+
+        // Fins stick out uniformly in 4 directions, so max/min X and Y should be roughly equal to max radius
+        let expected_bound = (config.diameter.value / 2.0) + (config.diameter.value / 2.0) * 3.0;
+
+        assert!(
+            (max_x - expected_bound).abs() < 1e-2,
+            "X bound max mismatch"
+        );
+        assert!(
+            (min_x - (-expected_bound)).abs() < 1e-2,
+            "X bound min mismatch"
+        );
+        assert!(
+            (max_y - expected_bound).abs() < 1e-2,
+            "Y bound max mismatch"
+        );
+        assert!(
+            (min_y - (-expected_bound)).abs() < 1e-2,
+            "Y bound min mismatch"
+        );
+    }
 }

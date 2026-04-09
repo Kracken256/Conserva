@@ -235,6 +235,143 @@ mod tests {
             yaw
         );
     }
+
+    #[test]
+    fn pid_proportional_response() {
+        let mut pid = Pid::new(2.0, 0.0, 0.0);
+        let cmd = pid.update(5.0, 0.1);
+        assert!((cmd - 10.0).abs() < 1e-6, "P control failed");
+    }
+
+    #[test]
+    fn pid_integral_response() {
+        let mut pid = Pid::new(0.0, 2.0, 0.0);
+        pid.update(5.0, 0.1); // error * dt * ki = 5 * 0.1 * 2 = 1.0
+        let cmd1 = pid.update(5.0, 0.1); // integral becomes 1.0 + 1.0 = 2.0
+        assert!((cmd1 - 2.0).abs() < 1e-6, "I control failed");
+    }
+
+    #[test]
+    fn pid_derivative_response() {
+        let mut pid = Pid::new(0.0, 0.0, 2.0);
+        pid.update(5.0, 0.1); // prev_error = 5.0
+        let cmd = pid.update(10.0, 0.1); // derivative = (10 - 5) / 0.1 = 50. kd * 50 = 100
+        assert!((cmd - 100.0).abs() < 1e-6, "D control failed");
+    }
+
+    #[test]
+    fn current_thrust_interpolates_correctly() {
+        let mut config = get_default_config();
+        config.motor_impulse_curve = vec![
+            (Time::new::<second>(0.0), Force::new::<newton>(100.0)),
+            (Time::new::<second>(1.0), Force::new::<newton>(200.0)),
+            (Time::new::<second>(2.0), Force::new::<newton>(0.0)),
+        ];
+
+        let mut fc = FlightComputer::new(config, None);
+
+        fc.time = 0.5;
+        let thrust = fc.current_thrust();
+        assert!(
+            (thrust.value - 150.0).abs() < 1e-6,
+            "Thrust interpolation failed"
+        );
+
+        fc.time = 1.5;
+        let thrust = fc.current_thrust();
+        assert!(
+            (thrust.value - 100.0).abs() < 1e-6,
+            "Thrust interpolation failed on descending leg"
+        );
+    }
+
+    #[test]
+    fn current_thrust_clamps_to_curve_bounds() {
+        let mut config = get_default_config();
+        config.motor_impulse_curve = vec![
+            (Time::new::<second>(1.0), Force::new::<newton>(100.0)),
+            (Time::new::<second>(2.0), Force::new::<newton>(200.0)),
+        ];
+
+        let mut fc = FlightComputer::new(config, None);
+
+        fc.time = 0.0;
+        let thrust_early = fc.current_thrust();
+        assert!(
+            (thrust_early.value - 100.0).abs() < 1e-6,
+            "Thrust should clamp to first point"
+        );
+
+        fc.time = 3.0;
+        let thrust_late = fc.current_thrust();
+        assert!(
+            (thrust_late.value - 200.0).abs() < 1e-6,
+            "Thrust should clamp to last point"
+        );
+    }
+
+    #[test]
+    fn tick_depletes_propellant() {
+        let state = get_initial_state();
+        let mut config = get_default_config();
+        config.motor_impulse_curve = vec![
+            (Time::new::<second>(0.0), Force::new::<newton>(5000.0)),
+            (Time::new::<second>(10.0), Force::new::<newton>(5000.0)),
+        ];
+
+        let mut fc = FlightComputer::new(config, None);
+        fc.time = 0.0; // starts at T=0
+
+        let initial_mass = state.propellant_mass.value;
+        let dt = 0.1;
+
+        let new_state = fc.tick(&state, dt);
+        let new_mass = new_state.propellant_mass.value;
+
+        assert!(new_mass < initial_mass, "Propellant should deplete");
+
+        // Expected consumption Calculation
+        // m_dot = F / (Isp * g0) = 5000 / (250 * 9.80665) = 2.0394... kg/s
+        let expected_burned = dt * 5000.0 / (250.0 * 9.80665);
+        assert!(
+            (new_mass - (initial_mass - expected_burned)).abs() < 1e-6,
+            "Mass depletion rate incorrect"
+        );
+    }
+
+    #[test]
+    fn off_axis_waypoint_generates_steering_command() {
+        let state = get_initial_state();
+        let mut config = get_default_config();
+        // Give some PID values to ensure commands are generated
+        config.pitch_pid_kp = 1.0;
+        config.yaw_pid_kp = 1.0;
+
+        let waypoint = Some(Vector3::new(
+            Length::new::<meter>(500.0), // Off to the side in +X
+            Length::new::<meter>(0.0),
+            Length::new::<meter>(500.0), // Ahead in +Z
+        ));
+
+        let mut fc = FlightComputer::new(config, waypoint);
+        let dt = 0.1;
+        let new_state = fc.tick(&state, dt);
+
+        let pitch = new_state.tvc_angles[0].get::<radian>();
+        let yaw = new_state.tvc_angles[1].get::<radian>();
+
+        // Waypoint is +X, so LOS vector has positive X.
+        // forward_body is +Z. cross(+Z, +X) = +Y (yaw axis).
+        // Thus error yaw is non-zero, pitch is zero.
+        assert!(
+            yaw.abs() > 0.01,
+            "Expected significant yaw gimbal command for off-axis target"
+        );
+        assert!(
+            pitch.abs() < 1e-6,
+            "Pitch command should be near zero for purely X-Z deviation"
+        );
+    }
 }
 
 pub struct TheRocket {
