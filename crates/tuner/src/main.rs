@@ -93,7 +93,7 @@ fn main() {
     );
 
     // Search Space Boundaries
-    let bounds = [(0.0, 1.0), (0.0, 0.1), (0.0, 1.0)]; // Kp, Ki, Kd
+    let bounds = [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)]; // Kp, Ki, Kd
 
     let mut wolves: Vec<Wolf> = (0..num_wolves)
         .map(|_| {
