@@ -2,7 +2,7 @@
 members = [
     ".",
     "crates/digital_twin",
-    "crates/digital_twin_glue",
+    "crates/digital_twin_glue", "crates/mesh_export",
     "crates/tuner",
 ]
 

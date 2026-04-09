@@ -271,6 +271,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mesh_export"
+version = "0.1.0"
+dependencies = [
+ "digital_twin",
+ "digital_twin_glue",
+]
+
+[[package]]
 name = "nalgebra"
 version = "0.34.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
