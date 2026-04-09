@@ -1,10 +1,35 @@
 use digital_twin::prelude::*;
 use digital_twin_glue::prelude::*;
 use nalgebra::Vector3;
+use std::fs::File;
 use std::io::{self, Write};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use uom::si::length::meter;
 use uom::si::velocity::meter_per_second;
+
+fn round_json_f64(val: &mut serde_json::Value) {
+    match val {
+        serde_json::Value::Number(n) => {
+            if let Some(f) = n.as_f64() {
+                let rounded = (f * 1e6).round() / 1e6;
+                if let Some(new_n) = serde_json::Number::from_f64(rounded) {
+                    *n = new_n;
+                }
+            }
+        }
+        serde_json::Value::Array(a) => {
+            for v in a.iter_mut() {
+                round_json_f64(v);
+            }
+        }
+        serde_json::Value::Object(o) => {
+            for v in o.values_mut() {
+                round_json_f64(v);
+            }
+        }
+        _ => {}
+    }
+}
 
 fn print_state(state: &MissileState, target: Option<Vector3<uom::si::f64::Length>>) {
     let wv = state.orientation * state.body_velocity.map(|v| v.get::<meter_per_second>());
@@ -42,6 +67,19 @@ fn main() {
     let state = get_initial_state(&config);
     let mesh_generator = TheMeshGenerator::default();
 
+    // Dump config when the program starts
+    let config_file =
+        File::create("missile.config.json").expect("Failed to create missile.config.json");
+    let mut config_val = serde_json::to_value(&config).expect("Failed to convert config to value");
+    round_json_f64(&mut config_val);
+    serde_json::to_writer_pretty(config_file, &config_val)
+        .expect("Failed to write to missile.config.json");
+
+    let mut flight_file =
+        File::create("missile.flight.json").expect("Failed to create missile.flight.json");
+    writeln!(flight_file, "[").expect("Failed to write array start");
+    let mut first_json_entry = true;
+
     let waypoint = Some(Vector3::new(
         uom::si::f64::Length::new::<meter>(1000.0),
         uom::si::f64::Length::new::<meter>(1000.0),
@@ -53,6 +91,7 @@ fn main() {
 
     let mut last_frame_time = Instant::now();
     let mut last_print_time = Instant::now();
+    let mut last_dump_time = Instant::now();
 
     // Slow down simulation relative to real time (e.g., 0.25x speed)
     let time_scale = 1.0;
@@ -101,7 +140,25 @@ fn main() {
             print_state(&twin.state, waypoint);
             last_print_time = now;
         }
+
+        // 4. Dump state to flight file every 100ms
+        if now.duration_since(last_dump_time).as_millis() >= 100 {
+            let mut state_val =
+                serde_json::to_value(&twin.state).expect("Failed to convert state to value");
+            round_json_f64(&mut state_val);
+            let json_str = serde_json::to_string(&state_val).expect("Failed to serialize state");
+
+            if !first_json_entry {
+                writeln!(flight_file, ",").expect("Failed to write comma");
+            }
+            write!(flight_file, "  {}", json_str).expect("Failed to write JSON entry");
+            first_json_entry = false;
+
+            last_dump_time = now;
+        }
     }
+
+    writeln!(flight_file, "\n]").expect("Failed to write array end");
 }
 
 #[cfg(test)]

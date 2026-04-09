@@ -2,7 +2,8 @@
 members = [
     ".",
     "crates/digital_twin",
-    "crates/digital_twin_glue", "crates/mesh_export",
+    "crates/digital_twin_glue",
+    "crates/mesh_export",
     "crates/tuner",
 ]
 
@@ -16,3 +17,4 @@ digital_twin_glue = { path = "crates/digital_twin_glue" }
 digital_twin = { path = "crates/digital_twin" }
 nalgebra = "0.34"
 uom = { version = "0.38.0", features = ["serde"] }
+serde_json = { version = "1.0.149", features = ["preserve_order"] }
