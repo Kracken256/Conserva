@@ -45,6 +45,12 @@ pub fn get_default_config() -> MissileConfig {
         diameter: Length::new::<meter>(0.1),
         fin_offset_from_nose: Length::new::<meter>(0.2),
         fin_chord_length: Length::new::<meter>(0.05),
+        pitch_pid_kp: 0.05,
+        pitch_pid_ki: 0.0,
+        pitch_pid_kd: 0.0,
+        yaw_pid_kp: 0.05,
+        yaw_pid_ki: 0.0,
+        yaw_pid_kd: 0.0,
         motor_impulse_curve: vec![
             (Time::new::<second>(0.0), Force::new::<newton>(0.0)),
             (Time::new::<second>(0.1), Force::new::<newton>(17800.0)),

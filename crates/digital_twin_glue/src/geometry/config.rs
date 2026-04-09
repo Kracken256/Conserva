@@ -7,5 +7,11 @@ pub struct MissileConfig {
     pub diameter: Length,
     pub fin_offset_from_nose: Length,
     pub fin_chord_length: Length,
+    pub pitch_pid_kp: f64,
+    pub pitch_pid_ki: f64,
+    pub pitch_pid_kd: f64,
+    pub yaw_pid_kp: f64,
+    pub yaw_pid_ki: f64,
+    pub yaw_pid_kd: f64,
     pub motor_impulse_curve: Vec<(Time, Force)>,
 }

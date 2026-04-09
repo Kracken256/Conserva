@@ -54,12 +54,18 @@ pub struct FlightComputer {
 
 impl FlightComputer {
     pub fn new(config: MissileConfig, target_waypoint: Option<Vector3<Length>>) -> Self {
+        let pitch_pid = Pid::new(
+            config.pitch_pid_kp,
+            config.pitch_pid_ki,
+            config.pitch_pid_kd,
+        );
+        let yaw_pid = Pid::new(config.yaw_pid_kp, config.yaw_pid_ki, config.yaw_pid_kd);
+
         Self {
             config,
             time: 0.0,
-            // Default P-I-D gains for Thrust Vector Control
-            pitch_pid: Pid::new(0.05, 0.0, 0.0),
-            yaw_pid: Pid::new(0.05, 0.0, 0.0),
+            pitch_pid,
+            yaw_pid,
             target_waypoint,
         }
     }
