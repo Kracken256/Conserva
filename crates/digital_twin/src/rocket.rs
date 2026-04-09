@@ -71,6 +71,9 @@ impl FlightComputer {
         }
     }
 
+    /// Core execution loop of the flight computer.
+    /// Runs continuously every time step `dt` to process sensors, update targeting, 
+    /// generate PID control commands, and move the actuating servos.
     pub fn tick(&mut self, state: &MissileState, dt: f64) -> MissileState {
         let mut new_state = state.clone();
 
@@ -82,34 +85,7 @@ impl FlightComputer {
         let w_yaw = state.angular_velocity[1].get::<radian_per_second>();
 
         // 3. Command: Compute desired rates to steer towards waypoint, or default to zero
-        let mut target_w_pitch = 0.0;
-        let mut target_w_yaw = 0.0;
-
-        if let Some(waypoint) = self.target_waypoint {
-            let dx_m = waypoint[0].get::<meter>() - state.position[0].get::<meter>();
-            let dy_m = waypoint[1].get::<meter>() - state.position[1].get::<meter>();
-            let dz_m = waypoint[2].get::<meter>() - state.position[2].get::<meter>();
-
-            let dist = (dx_m.powi(2) + dy_m.powi(2) + dz_m.powi(2)).sqrt();
-            if dist > 0.1 {
-                let los_world = Vector3::new(dx_m / dist, dy_m / dist, dz_m / dist);
-                let los_body = state.orientation.inverse() * los_world;
-
-                // Assuming +Z is the forward axis of the rocket nose
-                let forward_body = Vector3::new(0.0, 0.0, 1.0);
-
-                // Cross product yields the rotational axis and error magnitude needed to align
-                // with the line-of-sight vector.
-                let error_axis = forward_body.cross(&los_body);
-
-                // Proportional gain converting angle error (radians) to target angular rate (rad/s)
-                let k_align = 2.0;
-
-                // X-axis rotation is pitch, Y-axis rotation is yaw.
-                target_w_pitch = error_axis.x * k_align;
-                target_w_yaw = error_axis.y * k_align;
-            }
-        }
+        let (target_w_pitch, target_w_yaw) = self.compute_target_rates(state);
 
         // 4. Compute error between IMU and intent
         let error_pitch = target_w_pitch - w_pitch;
@@ -120,30 +96,133 @@ impl FlightComputer {
         let yaw_cmd = self.yaw_pid.update(error_yaw, dt);
 
         // 6. Actuate: Command TVC/Fins servos respecting structural boundaries (e.g. +/- 20 degrees)
-        let max_gimbal = self.config.engine.max_tvc_angle.get::<radian>();
+        let (pitch_angle, yaw_angle) = self.actuate(state, pitch_cmd, yaw_cmd, dt);
+        new_state.tvc_angles[0] = pitch_angle;
+        new_state.tvc_angles[1] = yaw_angle;
 
-        // Find the absolute target limits before applying physical actuation rate limits
-        // We negate the commands because a positive gimbal deflection on the nozzle
-        // physically creates a negative torque moment around the CG.
-        let target_pitch = (-pitch_cmd).clamp(-max_gimbal, max_gimbal);
-        let target_yaw = (-yaw_cmd).clamp(-max_gimbal, max_gimbal);
+        // 7. Update Engine and Mass Properties
+        self.update_physics_properties(&mut new_state);
 
-        // Account for TVC latency (first-order lag models the mechanical settling delay)
+        new_state
+    }
+
+    /// High-level navigation solver. 
+    /// If there is an active waypoint, instructs the system how fast it needs
+    /// to rotate (pitch & yaw) to point its nose at the target. 
+    fn compute_target_rates(&self, state: &MissileState) -> (f64, f64) {
+        if let Some(waypoint) = self.target_waypoint {
+            if let Some(los_body) = self.calculate_los_body(state, &waypoint) {
+                return self.compute_rates_from_los(&los_body);
+            }
+        }
+        (0.0, 0.0)
+    }
+
+    /// Converts a world-space waypoint target into a Line of Sight (LOS) vector 
+    /// mapping the target directly into the rocket's local body coordinate space.
+    fn calculate_los_body(
+        &self,
+        state: &MissileState,
+        waypoint: &Vector3<Length>,
+    ) -> Option<Vector3<f64>> {
+        let dx_m = waypoint[0].get::<meter>() - state.position[0].get::<meter>();
+        let dy_m = waypoint[1].get::<meter>() - state.position[1].get::<meter>();
+        let dz_m = waypoint[2].get::<meter>() - state.position[2].get::<meter>();
+
+        let dist = (dx_m.powi(2) + dy_m.powi(2) + dz_m.powi(2)).sqrt();
+        if dist > 0.1 {
+            let los_world = Vector3::new(dx_m / dist, dy_m / dist, dz_m / dist);
+            Some(state.orientation.inverse() * los_world)
+        } else {
+            None
+        }
+    }
+
+    /// Analyzes the body-relative Line of Sight (LOS) vector and outputs 
+    /// the target pitch and yaw rates required to rotate toward it via cross product.
+    fn compute_rates_from_los(&self, los_body: &Vector3<f64>) -> (f64, f64) {
+        // Assuming +Z is the forward axis of the rocket nose
+        let forward_body = Vector3::new(0.0, 0.0, 1.0);
+
+        // Cross product yields the rotational axis and error magnitude needed to align
+        // with the line-of-sight vector.
+        let error_axis = forward_body.cross(los_body);
+
+        // Proportional gain converting angle error (radians) to target angular rate (rad/s)
+        let k_align = 2.0;
+
+        // X-axis rotation is pitch, Y-axis rotation is yaw.
+        (error_axis.x * k_align, error_axis.y * k_align)
+    }
+
+    /// Converts raw PID angular acceleration commands into final servo orientations.
+    /// Acts as the main pipeline applying real-world hardware limits such as
+    /// structural stops, actuation lag delay, and motor turn speeds.
+    fn actuate(
+        &self,
+        state: &MissileState,
+        pitch_cmd: f64,
+        yaw_cmd: f64,
+        dt: f64,
+    ) -> (Angle, Angle) {
+        let (target_pitch, target_yaw) = self.apply_physical_bounds(pitch_cmd, yaw_cmd);
+
         let current_pitch = state.tvc_angles[0].get::<radian>();
         let current_yaw = state.tvc_angles[1].get::<radian>();
 
+        let (lagged_pitch, lagged_yaw) =
+            self.apply_latency_filter(current_pitch, current_yaw, target_pitch, target_yaw, dt);
+
+        let (actuated_pitch, actuated_yaw) =
+            self.apply_slew_rate_limits(current_pitch, current_yaw, lagged_pitch, lagged_yaw, dt);
+
+        (
+            Angle::new::<radian>(actuated_pitch),
+            Angle::new::<radian>(actuated_yaw),
+        )
+    }
+
+    /// Hard limit boundary preventing TVC engine bells / Fins from rotating past structural limits.
+    fn apply_physical_bounds(&self, pitch_cmd: f64, yaw_cmd: f64) -> (f64, f64) {
+        let max_gimbal = self.config.engine.max_tvc_angle.get::<radian>();
+        (
+            (-pitch_cmd).clamp(-max_gimbal, max_gimbal),
+            (-yaw_cmd).clamp(-max_gimbal, max_gimbal),
+        )
+    }
+
+    /// First-Order lag (PT1) filter modeling electromechanical delays preventing servo motors
+    /// from settling instantaneously. Creates an exponential smoothing curve based on `tau`.
+    fn apply_latency_filter(
+        &self,
+        current_pitch: f64,
+        current_yaw: f64,
+        target_pitch: f64,
+        target_yaw: f64,
+        dt: f64,
+    ) -> (f64, f64) {
         let tau = self.config.engine.tvc_activation_delay.get::<second>();
-        // alpha = 1.0 - exp(-dt / tau). Using a small tau approximation avoiding div-by-zero.
         let alpha = if tau > 1e-6 {
             1.0 - (-dt / tau).exp()
         } else {
             1.0
         };
 
-        let lagged_target_pitch = current_pitch + (target_pitch - current_pitch) * alpha;
-        let lagged_target_yaw = current_yaw + (target_yaw - current_yaw) * alpha;
+        let lagged_pitch = current_pitch + (target_pitch - current_pitch) * alpha;
+        let lagged_yaw = current_yaw + (target_yaw - current_yaw) * alpha;
+        (lagged_pitch, lagged_yaw)
+    }
 
-        // Account for TVC rotation slew rate preventing instantaneous "snaps"
+    /// Rate limiter ensuring the angular velocity of the moving parts never exceeds their 
+    /// physical rating (e.g., servo can only move 60 degrees per second).
+    fn apply_slew_rate_limits(
+        &self,
+        current_pitch: f64,
+        current_yaw: f64,
+        lagged_target_pitch: f64,
+        lagged_target_yaw: f64,
+        dt: f64,
+    ) -> (f64, f64) {
         let max_delta = self.config.engine.tvc_slew_rate.get::<radian_per_second>() * dt;
 
         let pitch_actuated =
@@ -151,29 +230,21 @@ impl FlightComputer {
         let yaw_actuated =
             current_yaw + (lagged_target_yaw - current_yaw).clamp(-max_delta, max_delta);
 
-        new_state.tvc_angles[0] = Angle::new::<radian>(pitch_actuated);
-        new_state.tvc_angles[1] = Angle::new::<radian>(yaw_actuated);
+        (pitch_actuated, yaw_actuated)
+    }
 
-        // 7. Track Motor Propellant Mass Depletion & Store Thrust Force
-        let thrust = self
-            .config
-            .engine
-            .current_thrust(Time::new::<second>(self.time));
+    /// Extrapolates live physics properties (mass, inertia tracking shifting CG, thrust curve output)
+    /// based on the actively elapsed flight computer time clock.
+    fn update_physics_properties(&self, state: &mut MissileState) {
+        let current_time = Time::new::<second>(self.time);
 
-        new_state.motor_thrust = thrust;
+        // Track Motor Propellant Mass Depletion & Store Thrust Force
+        state.motor_thrust = self.config.engine.current_thrust(current_time);
 
-        // 8. Update Vehicle Mass from Mass Curve
-        new_state.current_mass = self
-            .config
-            .mass
-            .current_mass(Time::new::<second>(self.time));
-        new_state.inertia_tensor = self
-            .config
-            .mass
-            .current_inertia_tensor(Time::new::<second>(self.time));
-        new_state.time = Time::new::<second>(self.time);
-
-        new_state
+        // Update Vehicle Mass and Inertia Tensor from Curves
+        state.current_mass = self.config.mass.current_mass(current_time);
+        state.inertia_tensor = self.config.mass.current_inertia_tensor(current_time);
+        state.time = current_time;
     }
 }
 
