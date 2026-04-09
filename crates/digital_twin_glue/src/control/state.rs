@@ -1,4 +1,4 @@
-use nalgebra::{UnitQuaternion, Vector3};
+use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 use serde::{Deserialize, Serialize};
 use uom::si::f64::{Angle, AngularVelocity, Force, Length, Mass, Time, Velocity};
 
@@ -13,4 +13,5 @@ pub struct MissileState {
     pub tvc_angles: [Angle; 2],
     pub current_mass: Mass,
     pub motor_thrust: Force,
+    pub inertia_tensor: Matrix3<f64>,
 }

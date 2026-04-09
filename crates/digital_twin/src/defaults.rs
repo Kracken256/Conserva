@@ -35,6 +35,7 @@ pub fn get_initial_state(config: &MissileConfig) -> MissileState {
         time: Time::new::<second>(0.0),
         current_mass: config.mass.wet_mass,
         motor_thrust: Force::new::<newton>(0.0),
+        inertia_tensor: config.mass.inertia_tensor,
     }
 }
 

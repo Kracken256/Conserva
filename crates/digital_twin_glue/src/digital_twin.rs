@@ -92,7 +92,7 @@ impl DigitalTwin {
             };
 
         // 3. Let RK4 run the show
-        self.state = self.rk4.step(&self.config, &self.state, physics_engine, dt);
+        self.state = self.rk4.step(&self.state, physics_engine, dt);
     }
 }
 
