@@ -109,6 +109,9 @@ fn main() {
     let mut global_best_params = particles[0].position;
     let mut global_best_score = f64::MAX;
 
+    let mut no_improvement_count = 0;
+    let mut prev_best_score = f64::MAX;
+
     let pb = ProgressBar::new((epochs * num_particles) as u64);
     pb.set_style(
         ProgressStyle::default_bar()
@@ -133,15 +136,34 @@ fn main() {
                 if score < global_best_score {
                     global_best_score = score;
                     global_best_params = particles[i].position;
-                    pb.set_message(format!("{:.2}", global_best_score));
+                    pb.set_message(format!(
+                        "{:.2}, Kp: {:.6}, Ki: {:.6}, Kd: {:.6}",
+                        global_best_score,
+                        global_best_params.0,
+                        global_best_params.1,
+                        global_best_params.2
+                    ));
                 }
             }
+        }
+
+        // Check for convergence: stop if the global best score hasn't improved by a minimum threshold over 10 epochs
+        if (prev_best_score - global_best_score).abs() < 1e-4 {
+            no_improvement_count += 1;
+        } else {
+            no_improvement_count = 0;
+            prev_best_score = global_best_score;
+        }
+
+        if no_improvement_count >= 10 {
+            pb.println(format!("Converged early at epoch {}!", epoch + 1));
+            break;
         }
 
         // 3. Movement with Inertia and Velocity Clamping
         let w = 0.6; // Inertia
         let c1 = 1.4; // Cognitive
-        let c2 = 1.8; // Social
+        let c2 = 1.8; // Social        // 1. Parallel Evaluation
 
         for p in &mut particles {
             let mut rng = rand::thread_rng();
