@@ -1,5 +1,5 @@
 use crate::control::state::MissileState;
 
-pub trait FlightComputer {
+pub trait Rocket {
     fn update(&mut self, state: &MissileState, dt: f32) -> MissileState;
 }

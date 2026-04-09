@@ -1,4 +1,4 @@
-use crate::control::flight_computer::FlightComputer;
+use crate::control::rocket::Rocket;
 use crate::control::state::MissileState;
 use crate::geometry::config::MissileConfig;
 use crate::geometry::mesh::{Mesh, MeshGenerator};
@@ -13,7 +13,7 @@ use uom::si::velocity::meter_per_second;
 pub struct DigitalTwin {
     pub config: MissileConfig,
     pub state: MissileState,
-    pub flight_computer: Box<dyn FlightComputer>,
+    pub rocket: Box<dyn Rocket>,
     pub solver: Box<dyn AeroSolver>,
     pub mesh_generator: Box<dyn MeshGenerator>,
     pub current_mesh: Mesh,
@@ -26,14 +26,14 @@ impl DigitalTwin {
         state: MissileState,
         solver: Box<dyn AeroSolver>,
         mesh_generator: Box<dyn MeshGenerator>,
-        flight_computer: Box<dyn FlightComputer>,
+        rocket: Box<dyn Rocket>,
     ) -> Self {
         Self {
             config,
             state,
             solver,
             mesh_generator,
-            flight_computer,
+            rocket,
             current_mesh: Mesh::default(),
             rk4: integ::rk4::Rk4 {},
         }
@@ -42,7 +42,7 @@ impl DigitalTwin {
     pub fn step(&mut self, dt: f32) {
         // 1. Update Flight Computer first (to get new fin angles/thrust settings)
         // The FC sets the "intent" for the next step.
-        self.state = self.flight_computer.update(&self.state, dt);
+        self.state = self.rocket.update(&self.state, dt);
 
         // 2. Define the "System Dynamics"
         let physics_engine =

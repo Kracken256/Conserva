@@ -1,2 +1,2 @@
-pub mod flight_computer;
+pub mod rocket;
 pub mod state;

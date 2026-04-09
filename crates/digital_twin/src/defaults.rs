@@ -2,9 +2,11 @@ use digital_twin_glue::prelude::*;
 use nalgebra::{Matrix3, UnitQuaternion};
 use uom::si::angle::radian;
 use uom::si::angular_velocity::radian_per_second;
-use uom::si::f32::{Angle, AngularVelocity, Length, Mass, Velocity};
+use uom::si::f32::{Angle, AngularVelocity, Force, Length, Mass, Time, Velocity};
+use uom::si::force::newton;
 use uom::si::length::meter;
 use uom::si::mass::kilogram;
+use uom::si::time::second;
 use uom::si::velocity::meter_per_second;
 
 pub fn get_initial_state() -> MissileState {
@@ -37,10 +39,13 @@ pub fn get_initial_state() -> MissileState {
 
 pub fn get_default_config() -> MissileConfig {
     MissileConfig {
-        body_length: 1.4,
-        diameter: 0.1,
-        fin_offset_from_nose: 0.2,
-        fin_chord_length: 0.05,
-        motor_impulse_curve: vec![(0.0, 0.0), (1.0, 1.0)],
+        body_length: Length::new::<meter>(1.4),
+        diameter: Length::new::<meter>(0.1),
+        fin_offset_from_nose: Length::new::<meter>(0.2),
+        fin_chord_length: Length::new::<meter>(0.05),
+        motor_impulse_curve: vec![
+            (Time::new::<second>(0.0), Force::new::<newton>(0.0)),
+            (Time::new::<second>(1.0), Force::new::<newton>(1.0)),
+        ],
     }
 }
