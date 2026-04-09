@@ -182,7 +182,7 @@ impl AeroSolver {
     }
 }
 
-use wide::{CmpEq, CmpGe, CmpGt, CmpLt, f64x4};
+use wide::{CmpGe, CmpGt, CmpLt, f64x4};
 
 impl AeroSolver {
     /// Iterates through all triangles on the given 3D `mesh`, computes the
@@ -507,5 +507,244 @@ impl AeroSolver {
             force: total_force,
             torque: total_torque,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nalgebra::{Matrix3, UnitQuaternion, Vector3};
+    use uom::si::angle::radian;
+    use uom::si::angular_velocity::radian_per_second;
+    use uom::si::f64::*;
+    use uom::si::force::newton;
+    use uom::si::mass::kilogram;
+    use uom::si::time::second;
+    use uom::si::velocity::meter_per_second;
+
+    fn create_dummy_state(v_inf: Vector3<f64>, w: Vector3<f64>) -> MissileState {
+        MissileState {
+            time: Time::new::<second>(0.0),
+            position: Vector3::zeros(),
+            body_velocity: Vector3::new(
+                Velocity::new::<meter_per_second>(v_inf.x),
+                Velocity::new::<meter_per_second>(v_inf.y),
+                Velocity::new::<meter_per_second>(v_inf.z),
+            ),
+            orientation: UnitQuaternion::identity(),
+            angular_velocity: Vector3::new(
+                AngularVelocity::new::<radian_per_second>(w.x),
+                AngularVelocity::new::<radian_per_second>(w.y),
+                AngularVelocity::new::<radian_per_second>(w.z),
+            ),
+            fin_angles: [Angle::new::<radian>(0.0); 4],
+            tvc_angles: [Angle::new::<radian>(0.0); 2],
+            current_mass: Mass::new::<kilogram>(10.0),
+            motor_thrust: Force::new::<newton>(0.0),
+            inertia_tensor: Matrix3::zeros(),
+        }
+    }
+
+    fn create_faces(normals: &[Vector3<f64>], areas: &[f64], centroids: &[Vector3<f64>]) -> Mesh {
+        let mut mesh = Mesh::default();
+        for ((n, a), c) in normals.iter().zip(areas.iter()).zip(centroids.iter()) {
+            mesh.faces.normal_x.push(n.x);
+            mesh.faces.normal_y.push(n.y);
+            mesh.faces.normal_z.push(n.z);
+            mesh.faces.area.push(*a);
+            mesh.faces.centroid_x.push(c.x);
+            mesh.faces.centroid_y.push(c.y);
+            mesh.faces.centroid_z.push(c.z);
+        }
+        mesh
+    }
+
+    fn assert_vec3_eq(a: Vector3<f64>, b: Vector3<f64>, tol: f64) {
+        assert!((a.x - b.x).abs() < tol, "X mismatch: {} vs {}", a.x, b.x);
+        assert!((a.y - b.y).abs() < tol, "Y mismatch: {} vs {}", a.y, b.y);
+        assert!((a.z - b.z).abs() < tol, "Z mismatch: {} vs {}", a.z, b.z);
+    }
+
+    #[test]
+    fn test_subsonic_force() {
+        let mut solver = AeroSolver::default();
+        let sos = 340.0;
+        let v_z = 0.5 * sos; // Mach 0.5 -> Subsonic
+        let state = create_dummy_state(Vector3::new(0.0, 0.0, v_z), Vector3::zeros());
+
+        let n = Vector3::new(0.0, 0.0, 1.0); // Facing directly into the 'wind' (which is coming relative to +Z velocity, so air comes from +Z)
+        let mesh = create_faces(&[n, n, n, n], &[1.0, 1.0, 1.0, 1.0], &[Vector3::zeros(); 4]);
+
+        let out = solver.calculate_forces(&mesh, &state, 1.225, sos, 1.8e-5);
+
+        // Windward coefficient:
+        // beta = sqrt(1 - 0.5^2) = 0.866025
+        // V_mag = 170.0
+        // q = 0.5 * 1.225 * 170^2 = 17701.25
+        // Cp = (1.0 * 2.0) / 0.866025 = 2.3094
+        // Area = 4.0
+        // Expected Force Z = q * Cp * Area = 17701.25 * 2.3094 * 4.0 = ~163533.15
+
+        // Force is applied in opposite direction of normal (-Z)
+        assert!(out.force.z < -100000.0);
+        assert_vec3_eq(
+            Vector3::new(out.force.x, out.force.y, 0.0),
+            Vector3::zeros(),
+            1e-4,
+        );
+        assert_vec3_eq(out.torque, Vector3::zeros(), 1e-4);
+    }
+
+    #[test]
+    fn test_transonic_force() {
+        let mut solver = AeroSolver::default();
+        let sos = 340.0;
+        let v_z = 1.0 * sos; // Mach 1.0 -> Transonic
+        let state = create_dummy_state(Vector3::new(0.0, 0.0, v_z), Vector3::zeros());
+
+        let n = Vector3::new(0.0, 0.0, 1.0);
+        let mesh = create_faces(&[n, n, n, n], &[1.0, 1.0, 1.0, 1.0], &[Vector3::zeros(); 4]);
+
+        let out = solver.calculate_forces(&mesh, &state, 1.225, sos, 1.8e-5);
+        assert!(out.force.z < -200000.0); // Large transonic drag
+    }
+
+    #[test]
+    fn test_supersonic_force() {
+        let mut solver = AeroSolver::default();
+        let sos = 340.0;
+        let v_z = 3.0 * sos; // Mach 3.0
+        let state = create_dummy_state(Vector3::new(0.0, 0.0, v_z), Vector3::zeros());
+
+        let n = Vector3::new(0.0, 0.0, 1.0);
+        let mesh = create_faces(&[n, n, n, n], &[1.0, 1.0, 1.0, 1.0], &[Vector3::zeros(); 4]);
+
+        let out = solver.calculate_forces(&mesh, &state, 1.225, sos, 1.8e-5);
+
+        // Supersonic Ackeret:
+        // beta = sqrt(3^2 - 1) = sqrt(8) = 2.828
+        // Cp = 2 / 2.828 = 0.707
+        assert!(out.force.z < -100000.0);
+    }
+
+    #[test]
+    fn test_hypersonic_force() {
+        let mut solver = AeroSolver::default();
+        let sos = 340.0;
+        let v_z = 6.0 * sos; // Mach 6.0
+        let state = create_dummy_state(Vector3::new(0.0, 0.0, v_z), Vector3::zeros());
+
+        let n = Vector3::new(0.0, 0.0, 1.0);
+        let mesh = create_faces(&[n, n, n, n], &[1.0, 1.0, 1.0, 1.0], &[Vector3::zeros(); 4]);
+
+        let out = solver.calculate_forces(&mesh, &state, 1.225, sos, 1.8e-5);
+        assert!(out.force.z < -1000000.0); // Very large hypersonic drag
+    }
+
+    #[test]
+    fn test_degenerate_faces_ignored() {
+        let mut solver = AeroSolver::default();
+        let sos = 340.0;
+        let state = create_dummy_state(Vector3::new(0.0, 0.0, sos), Vector3::zeros());
+
+        // One valid face, 3 tiny degenerate faces
+        let n = Vector3::new(0.0, 0.0, 1.0);
+        let mesh = create_faces(
+            &[n, n, n, n],
+            &[1.0, 1e-10, 1e-10, 1e-10],
+            &[Vector3::zeros(); 4],
+        );
+        let out_degenerate = solver.calculate_forces(&mesh, &state, 1.225, sos, 1.8e-5);
+
+        // One valid face, 3 missing faces
+        let mesh2 = create_faces(&[n], &[1.0], &[Vector3::zeros()]);
+        let out_single = solver.calculate_forces(&mesh2, &state, 1.225, sos, 1.8e-5);
+
+        assert_vec3_eq(out_degenerate.force, out_single.force, 1e-5);
+    }
+
+    #[test]
+    fn test_stagnant_bailout() {
+        let mut solver = AeroSolver::default();
+        let sos = 340.0;
+        // Near-zero velocity
+        let state = create_dummy_state(Vector3::new(0.0, 0.0, 1e-4), Vector3::zeros());
+        let n = Vector3::new(0.0, 0.0, 1.0);
+        let mesh = create_faces(&[n, n, n, n], &[1.0, 1.0, 1.0, 1.0], &[Vector3::zeros(); 4]);
+
+        let out = solver.calculate_forces(&mesh, &state, 1.225, sos, 1.8e-5);
+        // Force should be completely zero because v < 1e-3 triggers early bailout
+        assert_vec3_eq(out.force, Vector3::zeros(), 1e-10);
+    }
+
+    #[test]
+    fn test_simd_vs_scalar_remainder() {
+        let mut solver = AeroSolver::default();
+        let sos = 340.0;
+        let state = create_dummy_state(Vector3::new(0.0, 0.0, sos * 2.0), Vector3::zeros());
+
+        let n = Vector3::new(0.0, 0.0, 1.0);
+        let c = Vector3::zeros();
+
+        // 4 faces (uses exactly 1 SIMD chunk)
+        let mesh4 = create_faces(&[n, n, n, n], &[1.0, 1.0, 1.0, 1.0], &[c, c, c, c]);
+        let out4 = solver.calculate_forces(&mesh4, &state, 1.225, sos, 1.8e-5);
+
+        // 3 faces (uses exactly 3 scalar remainder, 0 SIMD)
+        let mesh3 = create_faces(&[n, n, n], &[1.0, 1.0, 1.0], &[c, c, c]);
+        let out3 = solver.calculate_forces(&mesh3, &state, 1.225, sos, 1.8e-5);
+
+        // 7 faces (1 SIMD chunk + 3 scalar remainder)
+        let mesh7 = create_faces(
+            &[n, n, n, n, n, n, n],
+            &[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            &[c, c, c, c, c, c, c],
+        );
+        let out7 = solver.calculate_forces(&mesh7, &state, 1.225, sos, 1.8e-5);
+
+        // We know that exactly proportional elements should yield proportional additive forces.
+        let force_per_face = out4.force / 4.0;
+        assert_vec3_eq(out3.force, force_per_face * 3.0, 1e-2);
+        assert_vec3_eq(out7.force, force_per_face * 7.0, 1e-2);
+    }
+
+    #[test]
+    fn test_angular_velocity() {
+        let mut solver = AeroSolver::default();
+        let sos = 340.0;
+
+        // Zero linear velocity, pure pitch angular velocity
+        let w = Vector3::new(10.0, 0.0, 0.0); // 10 rad/s pitch
+        let state = create_dummy_state(Vector3::zeros(), w);
+
+        // Two faces offset across the Y axis
+        // R1 = (0, 1, 0), v_loc = w x R1 = (10,0,0) x (0,1,0) = (0,0,10)
+        let mut mesh = Mesh::default();
+        mesh.faces.normal_x.push(0.0);
+        mesh.faces.normal_y.push(0.0);
+        mesh.faces.normal_z.push(1.0); // faces +Z
+        mesh.faces.area.push(1.0);
+        mesh.faces.centroid_x.push(0.0);
+        mesh.faces.centroid_y.push(1.0);
+        mesh.faces.centroid_z.push(0.0); // +Y offset
+
+        // R2 = (0, -1, 0), v_loc = w x R2 = (0,0,-10)
+        mesh.faces.normal_x.push(0.0);
+        mesh.faces.normal_y.push(0.0);
+        mesh.faces.normal_z.push(-1.0); // faces -Z
+        mesh.faces.area.push(1.0);
+        mesh.faces.centroid_x.push(0.0);
+        mesh.faces.centroid_y.push(-1.0);
+        mesh.faces.centroid_z.push(0.0); // -Y offset
+
+        let out = solver.calculate_forces(&mesh, &state, 1.225, sos, 1.8e-5);
+
+        // A pure pitch acting on fins creates opposing drag loads that generate a pure damping torque on X
+        assert!(out.torque.x < -100.0); // It asserts a damping torque opposite to the angular velocity (10.0)
+        assert_vec3_eq(
+            Vector3::new(0.0, out.torque.y, out.torque.z),
+            Vector3::zeros(),
+            1e-4,
+        );
     }
 }
