@@ -69,16 +69,19 @@ if __name__ == '__main__':
 
     # 3D model representation of the rocket
     rocket = Entity()
+    # A container for the visual mesh to pitch it forward 90 degrees so the nose aligns with the +Z (forward) axis
+    rocket_mesh = Entity(parent=rocket, rotation_x=90)
+
     # The main body (Ursina natively builds primitive geometries internally if custom string meshes aren't found)
-    Entity(parent=rocket, model=Cylinder(),
+    Entity(parent=rocket_mesh, model=Cylinder(),
            color=color.white, scale=(1.5, 6, 1.5))
-    # The nose cone (painted red) pointing 'up' along the local Y axis
-    Entity(parent=rocket, model=Cone(),
+    # The nose cone (painted red) pointing 'up'
+    Entity(parent=rocket_mesh, model=Cone(),
            color=color.red, scale=(1.5, 3, 1.5), y=4.5)
     # Adding some simple fins at the bottom to easily tell orientation
-    Entity(parent=rocket, model='cube',
+    Entity(parent=rocket_mesh, model='cube',
            color=color.red, scale=(4, 1.5, 0.2), y=-2.5)
-    Entity(parent=rocket, model='cube',
+    Entity(parent=rocket_mesh, model='cube',
            color=color.red, scale=(0.2, 1.5, 4), y=-2.5)
 
     target_waypoint = Entity(
