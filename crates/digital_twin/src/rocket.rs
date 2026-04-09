@@ -202,6 +202,10 @@ impl FlightComputer {
 
         // 8. Update Vehicle Mass from Mass Curve
         new_state.current_mass = self.current_mass();
+        new_state.inertia_tensor = self
+            .config
+            .mass
+            .current_inertia_tensor(Time::new::<second>(self.time));
         new_state.time = Time::new::<second>(self.time);
 
         new_state

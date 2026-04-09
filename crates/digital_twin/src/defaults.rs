@@ -35,7 +35,7 @@ pub fn get_initial_state(config: &MissileConfig) -> MissileState {
         time: Time::new::<second>(0.0),
         current_mass: config.mass.wet_mass,
         motor_thrust: Force::new::<newton>(0.0),
-        inertia_tensor: config.mass.inertia_tensor,
+        inertia_tensor: config.mass.current_inertia_tensor(Time::new::<second>(0.0)),
     }
 }
 
@@ -52,7 +52,10 @@ pub fn get_default_config() -> MissileConfig {
             // Normalized inertia tensor (I / m) for a cylinder: L = 1.4m, r = 0.05m
             // I_xx = I_yy = (3*r^2 + L^2) / 12 = 0.1639
             // I_zz = (r^2) / 2 = 0.00125
-            inertia_tensor: Matrix3::new(0.1639, 0.0, 0.0, 0.0, 0.1639, 0.0, 0.0, 0.0, 0.00125),
+            inertia_tensor_curve: vec![(
+                Time::new::<second>(0.0),
+                Matrix3::new(0.1639, 0.0, 0.0, 0.0, 0.1639, 0.0, 0.0, 0.0, 0.00125),
+            )],
         },
         geometry: MissileGeometryConfig {
             body_length: Length::new::<meter>(1.4),
