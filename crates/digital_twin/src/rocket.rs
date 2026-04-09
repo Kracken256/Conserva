@@ -55,11 +55,15 @@ pub struct FlightComputer {
 impl FlightComputer {
     pub fn new(config: MissileConfig, target_waypoint: Option<Vector3<Length>>) -> Self {
         let pitch_pid = Pid::new(
-            config.pitch_pid_kp,
-            config.pitch_pid_ki,
-            config.pitch_pid_kd,
+            config.controller.pitch_pid_kp,
+            config.controller.pitch_pid_ki,
+            config.controller.pitch_pid_kd,
         );
-        let yaw_pid = Pid::new(config.yaw_pid_kp, config.yaw_pid_ki, config.yaw_pid_kd);
+        let yaw_pid = Pid::new(
+            config.controller.yaw_pid_kp,
+            config.controller.yaw_pid_ki,
+            config.controller.yaw_pid_kd,
+        );
 
         Self {
             config,
@@ -72,7 +76,7 @@ impl FlightComputer {
 
     /// Evaluates the configured motor impulse curve at the current firmware execution time
     pub fn current_thrust(&self) -> Force {
-        let points = &self.config.motor_impulse_curve;
+        let points = &self.config.engine.motor_impulse_curve;
         if points.is_empty() {
             return Force::new::<newton>(0.0);
         }
@@ -262,7 +266,7 @@ mod tests {
     #[test]
     fn current_thrust_interpolates_correctly() {
         let mut config = get_default_config();
-        config.motor_impulse_curve = vec![
+        config.engine.motor_impulse_curve = vec![
             (Time::new::<second>(0.0), Force::new::<newton>(100.0)),
             (Time::new::<second>(1.0), Force::new::<newton>(200.0)),
             (Time::new::<second>(2.0), Force::new::<newton>(0.0)),
@@ -288,7 +292,7 @@ mod tests {
     #[test]
     fn current_thrust_clamps_to_curve_bounds() {
         let mut config = get_default_config();
-        config.motor_impulse_curve = vec![
+        config.engine.motor_impulse_curve = vec![
             (Time::new::<second>(1.0), Force::new::<newton>(100.0)),
             (Time::new::<second>(2.0), Force::new::<newton>(200.0)),
         ];
@@ -314,7 +318,7 @@ mod tests {
     fn tick_depletes_propellant() {
         let state = get_initial_state();
         let mut config = get_default_config();
-        config.motor_impulse_curve = vec![
+        config.engine.motor_impulse_curve = vec![
             (Time::new::<second>(0.0), Force::new::<newton>(5000.0)),
             (Time::new::<second>(10.0), Force::new::<newton>(5000.0)),
         ];
@@ -344,8 +348,8 @@ mod tests {
         let state = get_initial_state();
         let mut config = get_default_config();
         // Give some PID values to ensure commands are generated
-        config.pitch_pid_kp = 1.0;
-        config.yaw_pid_kp = 1.0;
+        config.controller.pitch_pid_kp = 1.0;
+        config.controller.yaw_pid_kp = 1.0;
 
         let waypoint = Some(Vector3::new(
             Length::new::<meter>(500.0), // Off to the side in +X

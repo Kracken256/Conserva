@@ -7,14 +7,14 @@ pub struct TheMeshGenerator {}
 
 impl MeshGenerator for TheMeshGenerator {
     fn generate(&self, _state: &MissileState, config: &MissileConfig, mesh: &mut Mesh) {
-        let radius = config.diameter.get::<meter>() / 2.0;
-        let body_length = config.body_length.get::<meter>();
-        let fin_offset = config.fin_offset_from_nose.get::<meter>();
-        let fin_chord = config.fin_chord_length.get::<meter>();
+        let radius = config.geometry.diameter.get::<meter>() / 2.0;
+        let body_length = config.geometry.body_length.get::<meter>();
+        let fin_offset = config.geometry.fin_offset_from_nose.get::<meter>();
+        let fin_chord = config.geometry.fin_chord_length.get::<meter>();
         let span = radius * 3.0; // Reasonable fin stick-out distance
         let fin_thickness = radius * 0.05_f64.max(0.001); // 5% of radius or minimum 1mm
 
-        let nose_length = config.diameter.get::<meter>() * 2.0; // Typical rocket nose
+        let nose_length = config.geometry.diameter.get::<meter>() * 2.0; // Typical rocket nose
 
         // Calculate dynamic Center of Gravity (CoG)
         let dry_m = _state.dry_mass.value;
@@ -299,7 +299,7 @@ mod tests {
             .map(|v| v.z)
             .fold(f64::INFINITY, f64::min);
         let calculated_length = max_z - min_z;
-        let expected_length = config.body_length.value;
+        let expected_length = config.geometry.body_length.value;
 
         // Allow a tiny floating-point margin
         assert!(
@@ -326,7 +326,7 @@ mod tests {
             .map(|v| (v.x * v.x + v.y * v.y).sqrt())
             .fold(f64::NEG_INFINITY, f64::max);
 
-        let expected_body_radius = config.diameter.value / 2.0;
+        let expected_body_radius = config.geometry.diameter.value / 2.0;
         let expected_span = expected_body_radius * 3.0;
         let expected_max_radius = expected_body_radius + expected_span;
 
@@ -369,7 +369,8 @@ mod tests {
             .fold(f64::INFINITY, f64::min);
 
         // Fins stick out uniformly in 4 directions, so max/min X and Y should be roughly equal to max radius
-        let expected_bound = (config.diameter.value / 2.0) + (config.diameter.value / 2.0) * 3.0;
+        let expected_bound =
+            (config.geometry.diameter.value / 2.0) + (config.geometry.diameter.value / 2.0) * 3.0;
 
         assert!(
             (max_x - expected_bound).abs() < 1e-2,

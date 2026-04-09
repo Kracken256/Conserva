@@ -44,21 +44,27 @@ pub fn get_initial_state() -> MissileState {
 
 pub fn get_default_config() -> MissileConfig {
     MissileConfig {
-        body_length: Length::new::<meter>(1.4),
-        diameter: Length::new::<meter>(0.1),
-        fin_offset_from_nose: Length::new::<meter>(1.2),
-        fin_chord_length: Length::new::<meter>(0.2),
-        pitch_pid_kp: 0.365516,
-        pitch_pid_ki: 0.100000,
-        pitch_pid_kd: 0.000000,
-        yaw_pid_kp: 0.365516,
-        yaw_pid_ki: 0.100000,
-        yaw_pid_kd: 0.000000,
-        motor_impulse_curve: vec![
-            (Time::new::<second>(0.0), Force::new::<newton>(0.0)),
-            (Time::new::<second>(0.1), Force::new::<newton>(17800.0)),
-            (Time::new::<second>(10.2), Force::new::<newton>(17800.0)),
-            (Time::new::<second>(10.4), Force::new::<newton>(0.0)),
-        ],
+        geometry: MissileGeometryConfig {
+            body_length: Length::new::<meter>(1.4),
+            diameter: Length::new::<meter>(0.1),
+            fin_offset_from_nose: Length::new::<meter>(1.2),
+            fin_chord_length: Length::new::<meter>(0.2),
+        },
+        controller: MissileControllerConfig {
+            pitch_pid_kp: 0.365516,
+            pitch_pid_ki: 0.100000,
+            pitch_pid_kd: 0.000000,
+            yaw_pid_kp: 0.365516,
+            yaw_pid_ki: 0.100000,
+            yaw_pid_kd: 0.000000,
+        },
+        engine: MissileEngineConfig {
+            motor_impulse_curve: vec![
+                (Time::new::<second>(0.0), Force::new::<newton>(0.0)),
+                (Time::new::<second>(0.1), Force::new::<newton>(17800.0)),
+                (Time::new::<second>(10.2), Force::new::<newton>(17800.0)),
+                (Time::new::<second>(10.4), Force::new::<newton>(0.0)),
+            ],
+        },
     }
 }

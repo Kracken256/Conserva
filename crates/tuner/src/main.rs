@@ -18,12 +18,12 @@ struct Particle {
 fn evaluate_pid(kp: f64, ki: f64, kd: f64, max_time: f64) -> f64 {
     let mut config = get_default_config();
     // Apply tuned parameters to both axes for symmetry in this test
-    config.pitch_pid_kp = kp;
-    config.pitch_pid_ki = ki;
-    config.pitch_pid_kd = kd;
-    config.yaw_pid_kp = kp;
-    config.yaw_pid_ki = ki;
-    config.yaw_pid_kd = kd;
+    config.controller.pitch_pid_kp = kp;
+    config.controller.pitch_pid_ki = ki;
+    config.controller.pitch_pid_kd = kd;
+    config.controller.yaw_pid_kp = kp;
+    config.controller.yaw_pid_ki = ki;
+    config.controller.yaw_pid_kd = kd;
 
     let state = get_initial_state();
     let mesh_generator = TheMeshGenerator::default();

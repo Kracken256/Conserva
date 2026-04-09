@@ -76,7 +76,7 @@ impl DigitalTwin {
                 let active_thrust = tvc_rotation * thrust_base;
 
                 // Calculate dynamic Center of Gravity (CoG)
-                let body_length = self.config.body_length.get::<meter>();
+                let body_length = self.config.geometry.body_length.get::<meter>();
                 let dry_m = sub_state.dry_mass.value;
                 let prop_m = sub_state.propellant_mass.value;
                 // Assume dry mass center is at geometric z=0 (middle)
