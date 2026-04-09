@@ -4,10 +4,20 @@ use indicatif::{ProgressBar, ProgressStyle};
 use nalgebra::Vector3;
 use rand::Rng;
 use rayon::prelude::*;
+use uom::si::f64::Length;
 use uom::si::length::meter;
+
+#[derive(Clone, Debug)]
+struct Particle {
+    position: (f64, f64, f64),
+    velocity: (f64, f64, f64),
+    best_position: (f64, f64, f64),
+    best_score: f64,
+}
 
 fn evaluate_pid(kp: f64, ki: f64, kd: f64) -> f64 {
     let mut config = get_default_config();
+    // Apply tuned parameters to both axes for symmetry in this test
     config.pitch_pid_kp = kp;
     config.pitch_pid_ki = ki;
     config.pitch_pid_kd = kd;
@@ -18,11 +28,8 @@ fn evaluate_pid(kp: f64, ki: f64, kd: f64) -> f64 {
     let state = get_initial_state();
     let mesh_generator = TheMeshGenerator::default();
 
-    let waypoint = Some(Vector3::new(
-        uom::si::f64::Length::new::<meter>(1000.0),
-        uom::si::f64::Length::new::<meter>(1000.0),
-        uom::si::f64::Length::new::<meter>(1000.0),
-    ));
+    let target_vec = Vector3::new(1000.0, 1000.0, 1000.0);
+    let waypoint = Some(target_vec.map(|c| Length::new::<meter>(c)));
 
     let rocket = TheRocket::new(config.clone(), waypoint);
     let mut twin = DigitalTwin::new(config, state, Box::new(mesh_generator), Box::new(rocket));
@@ -31,109 +38,141 @@ fn evaluate_pid(kp: f64, ki: f64, kd: f64) -> f64 {
     let dt = 0.01;
     let mut time = 0.0;
 
-    let mut min_distance = f64::MAX;
+    let mut itae_accumulator = 0.0;
+    let mut min_dist = f64::MAX;
+    let mut landed_early = false;
 
     while time < max_time {
         twin.step(dt);
         time += dt;
 
-        if let Some(wp) = waypoint {
-            let dx = wp[0].get::<meter>() - twin.state.position[0].get::<meter>();
-            let dy = wp[1].get::<meter>() - twin.state.position[1].get::<meter>();
-            let dz = wp[2].get::<meter>() - twin.state.position[2].get::<meter>();
-            let distance = (dx * dx + dy * dy + dz * dz).sqrt();
+        let current_pos = Vector3::new(
+            twin.state.position[0].get::<meter>(),
+            twin.state.position[1].get::<meter>(),
+            twin.state.position[2].get::<meter>(),
+        );
 
-            if distance < min_distance {
-                min_distance = distance;
-            }
-
-            if distance < 30.0 {
-                // Return a penalty based on time to incentivize faster hits
-                return time;
-            }
+        let error = (target_vec - current_pos).norm();
+        if error < min_dist {
+            min_dist = error;
         }
 
-        // Failsafe ground impact
-        if twin.state.position[2].get::<meter>() <= 0.0 && time > 1.0 {
+        // ITAE: Integral of Time-weighted Absolute Error
+        // This heavily penalizes oscillations that persist into late flight
+        itae_accumulator += time * error * dt;
+
+        // Penalty for high angular rates (jitter)
+        let w_mag = twin.state.angular_velocity.map(|v| v.value).norm();
+        itae_accumulator += w_mag * 5.0 * dt;
+
+        if current_pos.z <= 0.0 && time > 0.5 {
+            landed_early = true;
             break;
+        }
+
+        // Success condition: within 10m of waypoint
+        if error < 10.0 {
+            return itae_accumulator;
         }
     }
 
-    // Large penalty for missing, proportional to best distance achieved
-    1000.0 + min_distance
+    // Failure: Did not reach waypoint.
+    // Return ITAE plus a massive penalty based on how far away we finished.
+    let failure_penalty = if landed_early { 5000.0 } else { 2000.0 };
+    itae_accumulator + failure_penalty + (min_dist * 10.0)
 }
 
 fn main() {
-    println!("Starting PID tuning...");
+    let epochs = 60;
+    let num_particles = 120;
     let mut rng = rand::thread_rng();
 
-    // Default params (from digital_twin/src/defaults.rs)
-    let mut best_score;
-    let mut best_params = (0.05, 0.0, 0.0);
+    // Search Space Boundaries
+    let bounds = [(0.0, 1.0), (0.0, 0.1), (0.0, 1.0)]; // Kp, Ki, Kd
 
-    // Initial evaluate
-    let score = evaluate_pid(best_params.0, best_params.1, best_params.2);
-    best_score = score;
-    println!(
-        "Initial score (Time to hit or 1000 + dist): {:.2} for params: {:?}",
-        best_score, best_params
-    );
+    let mut particles: Vec<Particle> = (0..num_particles)
+        .map(|_| {
+            let pos = (
+                rng.gen_range(bounds[0].0..bounds[0].1),
+                rng.gen_range(bounds[1].0..bounds[1].1),
+                rng.gen_range(bounds[2].0..bounds[2].1),
+            );
+            Particle {
+                position: pos,
+                velocity: (0.0, 0.0, 0.0),
+                best_position: pos,
+                best_score: f64::MAX,
+            }
+        })
+        .collect();
 
-    println!("Running multi-core random jitter search...");
-    let epochs = 50;
-    let candidates_per_epoch = 100;
+    let mut global_best_params = particles[0].position;
+    let mut global_best_score = f64::MAX;
 
-    let total_evals = (epochs * candidates_per_epoch) as u64;
-    let pb = ProgressBar::new(total_evals);
+    let pb = ProgressBar::new((epochs * num_particles) as u64);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template(
-                "[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} eval ({eta}) | Best: {msg}",
-            )
-            .unwrap()
-            .progress_chars("#>-"),
+            .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} | Best ITAE: {msg}")
+            .unwrap(),
     );
-    pb.set_message(format!("{:.2}", best_score));
 
-    for i in 0..epochs {
-        // Generate candidates
-        let mut candidates = Vec::with_capacity(candidates_per_epoch);
-        for _ in 0..candidates_per_epoch {
-            let kp = (best_params.0 + rng.gen_range(-0.02..0.02)).max(0.0);
-            let ki = (best_params.1 + rng.gen_range(-0.005..0.005)).max(0.0);
-            let kd = (best_params.2 + rng.gen_range(-0.02..0.02)).max(0.0);
-            candidates.push((kp, ki, kd));
-        }
-
-        // Evaluate candidates in parallel using rayon
-        let results: Vec<(f64, (f64, f64, f64))> = candidates
-            .into_par_iter()
-            .map(|(kp, ki, kd)| {
-                let s = evaluate_pid(kp, ki, kd);
-                pb.inc(1);
-                (s, (kp, ki, kd))
-            })
+    for epoch in 0..epochs {
+        // 1. Parallel Evaluation
+        let scores: Vec<f64> = particles
+            .par_iter()
+            .map(|p| evaluate_pid(p.position.0, p.position.1, p.position.2))
             .collect();
 
-        // Update the best score if we found a better candidate in this epoch
-        for (s, (kp, ki, kd)) in results {
-            if s < best_score {
-                best_score = s;
-                best_params = (kp, ki, kd);
-                pb.println(format!(
-                    "Epoch {}: New best score: {:.2} for params: {:?}",
-                    i, best_score, best_params
-                ));
-                pb.set_message(format!("{:.2}", best_score));
+        // 2. Update Bests
+        for (i, score) in scores.into_iter().enumerate() {
+            pb.inc(1);
+            if score < particles[i].best_score {
+                particles[i].best_score = score;
+                particles[i].best_position = particles[i].position;
+
+                if score < global_best_score {
+                    global_best_score = score;
+                    global_best_params = particles[i].position;
+                    pb.set_message(format!("{:.2}", global_best_score));
+                }
             }
+        }
+
+        // 3. Movement with Inertia and Velocity Clamping
+        let w = 0.6; // Inertia
+        let c1 = 1.4; // Cognitive
+        let c2 = 1.8; // Social
+
+        for p in &mut particles {
+            let mut rng = rand::thread_rng();
+
+            // Update Velocity
+            p.velocity.0 = w * p.velocity.0
+                + c1 * rng.r#gen::<f64>() * (p.best_position.0 - p.position.0)
+                + c2 * rng.r#gen::<f64>() * (global_best_params.0 - p.position.0);
+            p.velocity.1 = w * p.velocity.1
+                + c1 * rng.r#gen::<f64>() * (p.best_position.1 - p.position.1)
+                + c2 * rng.r#gen::<f64>() * (global_best_params.1 - p.position.1);
+            p.velocity.2 = w * p.velocity.2
+                + c1 * rng.r#gen::<f64>() * (p.best_position.2 - p.position.2)
+                + c2 * rng.r#gen::<f64>() * (global_best_params.2 - p.position.2);
+
+            // Clamp Velocity to 10% of range to prevent chaotic jumps
+            p.velocity.0 = p.velocity.0.clamp(-0.1, 0.1);
+            p.velocity.1 = p.velocity.1.clamp(-0.01, 0.01);
+            p.velocity.2 = p.velocity.2.clamp(-0.1, 0.1);
+
+            // Apply Position and Clamp to bounds
+            p.position.0 = (p.position.0 + p.velocity.0).clamp(bounds[0].0, bounds[0].1);
+            p.position.1 = (p.position.1 + p.velocity.1).clamp(bounds[1].0, bounds[1].1);
+            p.position.2 = (p.position.2 + p.velocity.2).clamp(bounds[2].0, bounds[2].1);
         }
     }
 
-    pb.finish_with_message("Done!");
-
-    println!("--- Tuning Complete ---");
-    println!("Best Tuned PID Parameters for Pitch and Yaw:");
-    println!("Kp: {}", best_params.0);
-    println!("Ki: {}", best_params.1);
-    println!("Kd: {}", best_params.2);
+    pb.finish();
+    println!("\n--- Optimization Results ---");
+    println!("Final ITAE Score: {:.4}", global_best_score);
+    println!("Optimal Kp: {:.6}", global_best_params.0);
+    println!("Optimal Ki: {:.6}", global_best_params.1);
+    println!("Optimal Kd: {:.6}", global_best_params.2);
 }
