@@ -122,10 +122,20 @@ impl FlightComputer {
         // 6. Actuate: Command TVC/Fins servos respecting structural boundaries (e.g. +/- 20 degrees)
         let max_gimbal = self.config.engine.max_tvc_angle.get::<radian>();
 
+        // Find the absolute target limits before applying physical actuation rate limits
         // We negate the commands because a positive gimbal deflection on the nozzle
         // physically creates a negative torque moment around the CG.
-        let pitch_actuated = (-pitch_cmd).clamp(-max_gimbal, max_gimbal);
-        let yaw_actuated = (-yaw_cmd).clamp(-max_gimbal, max_gimbal);
+        let target_pitch = (-pitch_cmd).clamp(-max_gimbal, max_gimbal);
+        let target_yaw = (-yaw_cmd).clamp(-max_gimbal, max_gimbal);
+
+        // Account for TVC rotation slew rate preventing instantaneous "snaps"
+        let current_pitch = state.tvc_angles[0].get::<radian>();
+        let current_yaw = state.tvc_angles[1].get::<radian>();
+        let max_delta = self.config.engine.tvc_slew_rate.get::<radian_per_second>() * dt;
+
+        let pitch_actuated =
+            current_pitch + (target_pitch - current_pitch).clamp(-max_delta, max_delta);
+        let yaw_actuated = current_yaw + (target_yaw - current_yaw).clamp(-max_delta, max_delta);
 
         new_state.tvc_angles[0] = Angle::new::<radian>(pitch_actuated);
         new_state.tvc_angles[1] = Angle::new::<radian>(yaw_actuated);
@@ -157,7 +167,7 @@ impl FlightComputer {
 mod tests {
     use super::*;
     use crate::defaults::{get_default_config, get_initial_state};
-    use uom::si::f64::{Mass, Time};
+    use uom::si::f64::{Force, Mass, Time};
     use uom::si::force::newton;
     use uom::si::mass::kilogram;
     use uom::si::time::second;

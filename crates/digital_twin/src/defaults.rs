@@ -105,6 +105,7 @@ pub fn get_default_config() -> MissileConfig {
                 (Time::new::<second>(10.4), Force::new::<newton>(0.0)),
             ],
             max_tvc_angle: Angle::new::<radian>(20.0_f64.to_radians()),
+            tvc_slew_rate: AngularVelocity::new::<radian_per_second>(60.0_f64.to_radians()),
         },
     }
 }

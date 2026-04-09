@@ -1,6 +1,6 @@
 use nalgebra::{Matrix3, Vector3};
 use serde::{Deserialize, Serialize};
-use uom::si::f64::{Angle, Force, Length, Mass, Time};
+use uom::si::f64::{Angle, AngularVelocity, Force, Length, Mass, Time};
 use uom::si::time::second;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -75,6 +75,11 @@ pub struct MissileEngineConfig {
     /// engine can generate in a single tick regardless of PID requests. Proper tuning ensures
     /// the guidance software respects physical hardware servo limits without commanding over-travel.
     pub max_tvc_angle: Angle,
+    /// The absolute maximum rotational velocity at which the TVC nozzle actuators can physically
+    /// pivot to a new commanded position. This slew rate introduces a critical real-world delay,
+    /// meaning large commands take several milliseconds to execute. Modeling this constraint prevents
+    /// the simulation from performing impossible instantaneous control surface snaps.
+    pub tvc_slew_rate: AngularVelocity,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
