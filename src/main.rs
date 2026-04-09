@@ -8,14 +8,14 @@ fn main() {
     let config = get_default_config();
     let solver = TheSolver::default();
     let mesh_generator = TheMeshGenerator::default();
-    let flight_computer = TheFlightComputer::default();
+    let rocket = TheRocket::default();
 
     let mut twin = DigitalTwin::new(
         config,
         state,
         Box::new(solver),
         Box::new(mesh_generator),
-        Box::new(flight_computer),
+        Box::new(rocket),
     );
 
     let mut last_frame_time = Instant::now();

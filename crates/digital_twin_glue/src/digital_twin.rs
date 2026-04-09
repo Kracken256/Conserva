@@ -40,7 +40,7 @@ impl DigitalTwin {
     }
 
     pub fn step(&mut self, dt: f32) {
-        // 1. Update Flight Computer first (to get new fin angles/thrust settings)
+        // 1. Update Rocket first (to get new fin angles/thrust settings)
         // The FC sets the "intent" for the next step.
         self.state = self.rocket.update(&self.state, dt);
 
