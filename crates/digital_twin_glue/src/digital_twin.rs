@@ -47,6 +47,10 @@ impl DigitalTwin {
         // The FC sets the "intent" for the next step.
         self.state = self.rocket.update(&self.state, dt);
 
+        // Update mesh once per step instead of inside the RK4 loop
+        self.mesh_generator
+            .generate(&self.state, &self.config, &mut self.current_mesh);
+
         // 2. Define the "System Dynamics"
         let physics_engine =
             |v: &Vector3<f64>, w: &Vector3<f64>, q: &Quaternion<f64>, p: &Vector3<f64>| {
@@ -58,10 +62,6 @@ impl DigitalTwin {
                 sub_state.body_velocity = v.map(Velocity::new::<meter_per_second>);
                 sub_state.angular_velocity = w.map(AngularVelocity::new::<radian_per_second>);
                 sub_state.orientation = UnitQuaternion::from_quaternion(*q);
-
-                // Update mesh for this sub-step (now with altitude/position awareness!)
-                self.mesh_generator
-                    .generate(&sub_state, &self.config, &mut self.current_mesh);
 
                 // Convert world-frame wind to body-frame and compute relative airspeed
                 let wind_body_f64 = sub_state.orientation.inverse()
