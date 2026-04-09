@@ -70,6 +70,7 @@ impl AeroSolver {
     /// Evaluates the aerodynamic forces acting on a 3D mesh based on current airspeed and altitude.
     /// It discretizes the total flow across localized triangles depending on the flight regime,
     /// integrating the resulting force and torque over the entirety of the object surface.
+    /// This solver employs 8-wide SIMD vectors to maximize throughput.
     pub fn calculate_forces(
         &mut self,
         mesh: &Mesh,
@@ -185,9 +186,9 @@ impl AeroSolver {
 use wide::{CmpGe, CmpGt, CmpLt, f64x8};
 
 impl AeroSolver {
-    /// Iterates through all triangles on the given 3D `mesh`, computes the
-    /// localized aerodynamic forces (pressure and viscous skin friction),
-    /// and accumulates them into a net spatial force and torque around the CG.
+    /// Integrates the localized aerodynamic forces (pressure and viscous skin friction)
+    /// across all triangles in the given 3D `mesh`, accumulating them into a net spatial
+    /// force and torque around the CG. The integration uses `f64x8` SIMD batches for performance.
     ///
     /// # Arguments
     /// * `mesh` - The triangulated surface representing the geometry.
@@ -330,10 +331,9 @@ impl AeroSolver {
 
             let v_mag = norm3(v_local_x, v_local_y, v_local_z);
 
-            // Early bailout for stagnant points
+            // Early bailout for stagnant points or fully degenerate chunks
             let v_mag_mask = v_mag.simd_ge(f64x8::splat(1e-3));
             let valid_mask = area_mask & v_mag_mask;
-            // If valid_mask is all zeros, early bailout!
             if valid_mask.to_array() == [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] {
                 continue;
             }
@@ -378,9 +378,9 @@ impl AeroSolver {
 
             let safe_reynolds = reynolds.max(f64x8::splat(1e-5));
 
-            // Pow logic: x^-0.2 is the same as 1.0 / x^0.2. wide's powf is not natively supported for f64x8,
-            // but we can compute it manually or use scalars if wide doesn't have it.
-            // Wait, wide doesn't have pow/powf on f64x8! Let's do it using scalar array for this specific operation
+            // Calculate turbulent skin friction C_f using a 1/5th power law.
+            // Since `wide` lacks a vectorized `powf` for `f64x8`, we fall back to a scalar array computation.
+            // x^-0.2 is mathematically equivalent to 1.0 / x^0.2.
             let safe_rey_arr = safe_reynolds.to_array();
             let cp_turb_arr = [
                 0.074 / safe_rey_arr[0].powf(0.2), 0.074 / safe_rey_arr[1].powf(0.2),
@@ -418,8 +418,8 @@ impl AeroSolver {
             let ft_y = tangent_mask.blend(tangent_dir_y * ft_mag, f64x8::splat(0.0));
             let ft_z = tangent_mask.blend(tangent_dir_z * ft_mag, f64x8::splat(0.0));
 
-            // Total elemental force
-            // Apply valid mask to ignore degenerate/stagnant completely!
+            // Accumulate total elemental forces.
+            // The valid_mask ensures degenerate or stagnant faces realistically contribute exactly 0.0.
             let f_x = valid_mask.blend(fn_x + ft_x, f64x8::splat(0.0));
             let f_y = valid_mask.blend(fn_y + ft_y, f64x8::splat(0.0));
             let f_z = valid_mask.blend(fn_z + ft_z, f64x8::splat(0.0));
@@ -479,8 +479,7 @@ impl AeroSolver {
             let d = -loc_v / vm;
             let cdt = n_scalar.dot(&d);
 
-            // Wrap scalar variables into f64x8 arrays to pass to calc_windward_cp!
-            // Because calc_windward_cp expects SIMD arguments!
+            // Broadcast scalar remainder variables into f64x8 vectors to satisfy the `calc_windward_cp` signature.
             let cw_arr = calc_windward_cp(f64x8::splat(cdt.abs()), f64x8::splat(lmach)).to_array();
             let cp_w = cw_arr[0];
             let cp = if cdt < 0.0 { cp_w } else { leeward_cp };
