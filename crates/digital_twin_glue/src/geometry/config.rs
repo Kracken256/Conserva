@@ -1,6 +1,6 @@
 use nalgebra::{Matrix3, Vector3};
 use serde::{Deserialize, Serialize};
-use uom::si::f64::{Force, Length, Mass, Time};
+use uom::si::f64::{Angle, Force, Length, Mass, Time};
 use uom::si::time::second;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -70,6 +70,11 @@ pub struct MissileEngineConfig {
     /// force the exhaust plume exerts on the airframe. The completion of this trace fundamentally
     /// indicates motor burnout and aerodynamic coasting operations.
     pub motor_impulse_curve: Vec<(Time, Force)>,
+    /// The maximum physical deflection angle allowed by the Thrust Vector Control (TVC) nozzle
+    /// gimbal actuators. This hard constraint limits the magnitude of correcting moments the
+    /// engine can generate in a single tick regardless of PID requests. Proper tuning ensures
+    /// the guidance software respects physical hardware servo limits without commanding over-travel.
+    pub max_tvc_angle: Angle,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -162,6 +167,41 @@ impl MissileGeometryConfig {
     }
 }
 
+impl MissileEngineConfig {
+    /// Evaluates the configured motor impulse curve at the given time
+    pub fn current_thrust(&self, time: Time) -> Force {
+        let points = &self.motor_impulse_curve;
+        if points.is_empty() {
+            return Force::new::<uom::si::force::newton>(0.0);
+        }
+
+        let t = time.get::<second>();
+        let first_t = points[0].0.get::<second>();
+        let last_t = points.last().unwrap().0.get::<second>();
+
+        if t <= first_t {
+            return points[0].1;
+        }
+        if t >= last_t {
+            return points.last().unwrap().1;
+        }
+
+        for i in 0..points.len() - 1 {
+            let t0 = points[i].0.get::<second>();
+            let t1 = points[i + 1].0.get::<second>();
+
+            if t >= t0 && t <= t1 {
+                let f0 = points[i].1;
+                let f1 = points[i + 1].1;
+                let percent = (t - t0) / (t1 - t0);
+                return f0 + (f1 - f0) * percent;
+            }
+        }
+
+        Force::new::<uom::si::force::newton>(0.0)
+    }
+}
+
 impl MissileMassConfig {
     /// Evaluates the inertia tensor curve at the given time
     pub fn current_inertia_tensor(&self, time: Time) -> Matrix3<f64> {
@@ -194,6 +234,39 @@ impl MissileMassConfig {
         }
 
         points.last().unwrap().1
+    }
+
+    /// Evaluates the configured mass curve at the given time
+    pub fn current_mass(&self, time: Time) -> Mass {
+        let points = &self.mass_curve;
+        if points.is_empty() {
+            return self.dry_mass;
+        }
+
+        let t = time.get::<second>();
+        let first_t = points[0].0.get::<second>();
+        let last_t = points.last().unwrap().0.get::<second>();
+
+        if t <= first_t {
+            return points[0].1;
+        }
+        if t >= last_t {
+            return points.last().unwrap().1;
+        }
+
+        for i in 0..points.len() - 1 {
+            let t0 = points[i].0.get::<second>();
+            let t1 = points[i + 1].0.get::<second>();
+
+            if t >= t0 && t <= t1 {
+                let m0 = points[i].1;
+                let m1 = points[i + 1].1;
+                let percent = (t - t0) / (t1 - t0);
+                return m0 + (m1 - m0) * percent;
+            }
+        }
+
+        self.dry_mass
     }
 }
 

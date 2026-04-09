@@ -2,8 +2,7 @@ use digital_twin_glue::prelude::*;
 use nalgebra::Vector3;
 use uom::si::angle::radian;
 use uom::si::angular_velocity::radian_per_second;
-use uom::si::f64::{Angle, Force, Length, Mass, Time};
-use uom::si::force::newton;
+use uom::si::f64::{Angle, Length, Time};
 use uom::si::length::meter;
 use uom::si::time::second;
 
@@ -72,70 +71,6 @@ impl FlightComputer {
         }
     }
 
-    /// Evaluates the configured motor impulse curve at the current firmware execution time
-    pub fn current_thrust(&self) -> Force {
-        let points = &self.config.engine.motor_impulse_curve;
-        if points.is_empty() {
-            return Force::new::<newton>(0.0);
-        }
-
-        let first_t = points[0].0.get::<second>();
-        let last_t = points.last().unwrap().0.get::<second>();
-
-        if self.time <= first_t {
-            return points[0].1;
-        }
-        if self.time >= last_t {
-            return points.last().unwrap().1;
-        }
-
-        for i in 0..points.len() - 1 {
-            let t0 = points[i].0.get::<second>();
-            let t1 = points[i + 1].0.get::<second>();
-
-            if self.time >= t0 && self.time <= t1 {
-                let f0 = points[i].1;
-                let f1 = points[i + 1].1;
-                let percent = (self.time - t0) / (t1 - t0);
-                return f0 + (f1 - f0) * percent;
-            }
-        }
-
-        Force::new::<newton>(0.0)
-    }
-
-    /// Evaluates the configured mass curve at the current firmware execution time
-    pub fn current_mass(&self) -> Mass {
-        let points = &self.config.mass.mass_curve;
-        if points.is_empty() {
-            return self.config.mass.dry_mass;
-        }
-
-        let first_t = points[0].0.get::<second>();
-        let last_t = points.last().unwrap().0.get::<second>();
-
-        if self.time <= first_t {
-            return points[0].1;
-        }
-        if self.time >= last_t {
-            return points.last().unwrap().1;
-        }
-
-        for i in 0..points.len() - 1 {
-            let t0 = points[i].0.get::<second>();
-            let t1 = points[i + 1].0.get::<second>();
-
-            if self.time >= t0 && self.time <= t1 {
-                let m0 = points[i].1;
-                let m1 = points[i + 1].1;
-                let percent = (self.time - t0) / (t1 - t0);
-                return m0 + (m1 - m0) * percent;
-            }
-        }
-
-        self.config.mass.dry_mass
-    }
-
     pub fn tick(&mut self, state: &MissileState, dt: f64) -> MissileState {
         let mut new_state = state.clone();
 
@@ -185,7 +120,7 @@ impl FlightComputer {
         let yaw_cmd = self.yaw_pid.update(error_yaw, dt);
 
         // 6. Actuate: Command TVC/Fins servos respecting structural boundaries (e.g. +/- 20 degrees)
-        let max_gimbal = 20.0_f64.to_radians();
+        let max_gimbal = self.config.engine.max_tvc_angle.get::<radian>();
 
         // We negate the commands because a positive gimbal deflection on the nozzle
         // physically creates a negative torque moment around the CG.
@@ -196,12 +131,18 @@ impl FlightComputer {
         new_state.tvc_angles[1] = Angle::new::<radian>(yaw_actuated);
 
         // 7. Track Motor Propellant Mass Depletion & Store Thrust Force
-        let thrust = self.current_thrust();
+        let thrust = self
+            .config
+            .engine
+            .current_thrust(Time::new::<second>(self.time));
 
         new_state.motor_thrust = thrust;
 
         // 8. Update Vehicle Mass from Mass Curve
-        new_state.current_mass = self.current_mass();
+        new_state.current_mass = self
+            .config
+            .mass
+            .current_mass(Time::new::<second>(self.time));
         new_state.inertia_tensor = self
             .config
             .mass
@@ -293,17 +234,13 @@ mod tests {
             (Time::new::<second>(2.0), Force::new::<newton>(0.0)),
         ];
 
-        let mut fc = FlightComputer::new(config, None);
-
-        fc.time = 0.5;
-        let thrust = fc.current_thrust();
+        let thrust = config.engine.current_thrust(Time::new::<second>(0.5));
         assert!(
             (thrust.value - 150.0).abs() < 1e-6,
             "Thrust interpolation failed"
         );
 
-        fc.time = 1.5;
-        let thrust = fc.current_thrust();
+        let thrust = config.engine.current_thrust(Time::new::<second>(1.5));
         assert!(
             (thrust.value - 100.0).abs() < 1e-6,
             "Thrust interpolation failed on descending leg"
@@ -318,17 +255,13 @@ mod tests {
             (Time::new::<second>(2.0), Force::new::<newton>(200.0)),
         ];
 
-        let mut fc = FlightComputer::new(config, None);
-
-        fc.time = 0.0;
-        let thrust_early = fc.current_thrust();
+        let thrust_early = config.engine.current_thrust(Time::new::<second>(0.0));
         assert!(
             (thrust_early.value - 100.0).abs() < 1e-6,
             "Thrust should clamp to first point"
         );
 
-        fc.time = 3.0;
-        let thrust_late = fc.current_thrust();
+        let thrust_late = config.engine.current_thrust(Time::new::<second>(3.0));
         assert!(
             (thrust_late.value - 200.0).abs() < 1e-6,
             "Thrust should clamp to last point"

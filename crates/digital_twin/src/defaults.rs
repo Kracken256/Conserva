@@ -104,6 +104,7 @@ pub fn get_default_config() -> MissileConfig {
                 (Time::new::<second>(10.2), Force::new::<newton>(17800.0)),
                 (Time::new::<second>(10.4), Force::new::<newton>(0.0)),
             ],
+            max_tvc_angle: Angle::new::<radian>(20.0_f64.to_radians()),
         },
     }
 }
