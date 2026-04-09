@@ -181,6 +181,9 @@ impl FlightComputer {
 mod tests {
     use super::*;
     use crate::defaults::{get_default_config, get_initial_state};
+    use uom::si::angle::degree;
+    use uom::si::angular_velocity::degree_per_second;
+    use uom::si::f64::AngularVelocity;
     use uom::si::f64::{Force, Mass, Time};
     use uom::si::force::newton;
     use uom::si::mass::kilogram;
@@ -349,6 +352,82 @@ mod tests {
         assert!(
             pitch.abs() < 1e-6,
             "Pitch command should be near zero for purely X-Z deviation"
+        );
+    }
+
+    #[test]
+    fn slew_rate_limits_tvc_command() {
+        let mut config = get_default_config();
+        // Remove latency for simple slew test
+        config.engine.tvc_activation_delay = Time::new::<second>(0.0);
+        let slew_rate = 10.0; // deg/s
+        config.engine.tvc_slew_rate = AngularVelocity::new::<degree_per_second>(slew_rate);
+
+        let state = get_initial_state(&config);
+
+        config.controller.pitch_pid_kp = 100.0; // ensure large command
+
+        let waypoint = Some(Vector3::new(
+            Length::new::<meter>(0.0),
+            Length::new::<meter>(500.0), // Off to the side for pitch command (Y-axis)
+            Length::new::<meter>(500.0),
+        ));
+
+        let mut fc = FlightComputer::new(config, waypoint);
+        let dt = 0.1;
+
+        let new_state = fc.tick(&state, dt);
+        let pitch = new_state.tvc_angles[0].get::<degree>();
+
+        // Expected max delta: 10.0 deg/s * 0.1 s = 1.0 deg
+        assert!(
+            (pitch.abs() - 1.0).abs() < 1e-4,
+            "TVC angle should be slew rate limited to 1.0 deg, got: {}",
+            pitch
+        );
+    }
+
+    #[test]
+    fn latency_filters_tvc_command() {
+        let mut config = get_default_config();
+
+        let tau = 0.5; // seconds
+        config.engine.tvc_activation_delay = Time::new::<second>(tau);
+        // Prevent slew rate from interfering with latency test
+        config.engine.tvc_slew_rate = AngularVelocity::new::<degree_per_second>(1000.0);
+
+        let state = get_initial_state(&config);
+
+        config.controller.pitch_pid_kp = 10.0;
+
+        let waypoint = Some(Vector3::new(
+            Length::new::<meter>(0.0),
+            Length::new::<meter>(500.0),
+            Length::new::<meter>(500.0),
+        ));
+
+        let mut fc = FlightComputer::new(config.clone(), waypoint);
+        let dt = 0.1;
+
+        // Let's run a tick with zero tau to see what the direct PID target would be
+        let mut config_no_latency = config;
+        config_no_latency.engine.tvc_activation_delay = Time::new::<second>(0.0);
+        let mut fc_no_latency = FlightComputer::new(config_no_latency, waypoint);
+        let state_no_latency = fc_no_latency.tick(&state, dt);
+        let raw_target_pitch = state_no_latency.tvc_angles[0].get::<degree>();
+
+        // Now run the tick with latency
+        let new_state = fc.tick(&state, dt);
+        let lagged_pitch = new_state.tvc_angles[0].get::<degree>();
+
+        let expected_alpha = 1.0 - (-dt / tau).exp();
+        let expected_lagged_pitch = raw_target_pitch * expected_alpha;
+
+        assert!(
+            (lagged_pitch - expected_lagged_pitch).abs() < 1e-4,
+            "Expected latency filtered pitch {}, got: {}",
+            expected_lagged_pitch,
+            lagged_pitch
         );
     }
 }
