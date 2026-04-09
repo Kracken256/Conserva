@@ -33,7 +33,7 @@ const ATMOSPHERE_TABLE: &[(f64, f64, f64, f64)] = &[
 ///
 /// # Returns
 /// A tuple containing `(density, speed_of_sound, dynamic_viscosity)`.
-fn lookup_atmosphere(altitude: f64) -> (f64, f64, f64) {
+pub fn lookup_atmosphere(altitude: f64) -> (f64, f64, f64) {
     // Above 100km (Karman line), we assume negligible atmosphere.
     if altitude > 100_000.0 {
         return (1e-12, 280.0, 1.3e-5);
@@ -70,10 +70,14 @@ impl AeroSolver {
     /// Evaluates the aerodynamic forces acting on a 3D mesh based on current airspeed and altitude.
     /// It discretizes the total flow across localized triangles depending on the flight regime,
     /// integrating the resulting force and torque over the entirety of the object surface.
-    pub fn calculate_forces(&mut self, mesh: &Mesh, state: &MissileState) -> SolverOutput {
-        let altitude = state.position.z.value.abs();
-        let (air_density, speed_of_sound, dyn_viscosity) = lookup_atmosphere(altitude);
-
+    pub fn calculate_forces(
+        &mut self,
+        mesh: &Mesh,
+        state: &MissileState,
+        air_density: f64,
+        speed_of_sound: f64,
+        dyn_viscosity: f64,
+    ) -> SolverOutput {
         // Treat center of mass near origin natively for the local formulation
         let cm_local = Vector3::zeros();
 

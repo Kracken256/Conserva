@@ -3,7 +3,7 @@ use crate::control::state::MissileState;
 use crate::geometry::config::MissileConfig;
 use crate::geometry::mesh::{Mesh, MeshGenerator};
 use crate::integ;
-use crate::physics::solver::AeroSolver;
+use crate::physics::solver::{AeroSolver, lookup_atmosphere};
 use nalgebra::{Quaternion, Rotation3, UnitQuaternion, Vector3};
 use uom::si::angle::radian;
 use uom::si::angular_velocity::{AngularVelocity, radian_per_second};
@@ -51,6 +51,10 @@ impl DigitalTwin {
         self.mesh_generator
             .generate(&self.state, &self.config, &mut self.current_mesh);
 
+        // Lookup atmospheric properties once per step
+        let altitude = self.state.position.z.value.abs();
+        let (air_density, speed_of_sound, dyn_viscosity) = lookup_atmosphere(altitude);
+
         // 2. Define the "System Dynamics"
         let physics_engine =
             |v: &Vector3<f64>, w: &Vector3<f64>, q: &Quaternion<f64>, p: &Vector3<f64>| {
@@ -69,7 +73,13 @@ impl DigitalTwin {
                 let wind_body_vel = wind_body_f64.map(Velocity::new::<meter_per_second>);
                 sub_state.body_velocity -= wind_body_vel;
 
-                let output = self.solver.calculate_forces(&self.current_mesh, &sub_state);
+                let output = self.solver.calculate_forces(
+                    &self.current_mesh,
+                    &sub_state,
+                    air_density,
+                    speed_of_sound,
+                    dyn_viscosity,
+                );
 
                 // Restore absolute body velocity before continuing (RK4 needs true state velocity, not airspeed)
                 sub_state.body_velocity += wind_body_vel;
