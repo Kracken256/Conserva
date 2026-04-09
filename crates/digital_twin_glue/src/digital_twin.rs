@@ -50,22 +50,22 @@ impl DigitalTwin {
         // Update mesh once per step instead of inside the RK4 loop
         self.mesh_generator
             .generate(&self.state, &self.config, &mut self.current_mesh);
+        // Precompute normals/centroids so we don't recalculate 4 times per RK4 step
+        self.current_mesh.compute_surface_properties();
 
         // Lookup atmospheric properties once per step
         let altitude = self.state.position.z.value.abs();
         let (air_density, speed_of_sound, dyn_viscosity) = lookup_atmosphere(altitude);
 
         // 2. Define the "System Dynamics"
+        let mut sub_state = self.state.clone();
         let physics_engine =
-            |v: &Vector3<f64>, w: &Vector3<f64>, q: &Quaternion<f64>, p: &Vector3<f64>| {
-                // Create a temporary state for the sub-step
-                let mut sub_state = self.state.clone();
-
+            |v: Vector3<f64>, w: Vector3<f64>, q: Quaternion<f64>, p: Vector3<f64>| {
                 // Map raw f64s back into uom quantities
                 sub_state.position = p.map(Length::new::<meter>);
                 sub_state.body_velocity = v.map(Velocity::new::<meter_per_second>);
                 sub_state.angular_velocity = w.map(AngularVelocity::new::<radian_per_second>);
-                sub_state.orientation = UnitQuaternion::from_quaternion(*q);
+                sub_state.orientation = UnitQuaternion::from_quaternion(q);
 
                 // Convert world-frame wind to body-frame and compute relative airspeed
                 let wind_body_f64 = sub_state.orientation.conjugate()

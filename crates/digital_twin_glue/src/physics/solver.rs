@@ -218,32 +218,31 @@ impl AeroSolver {
         let mut total_force = Vector3::zeros();
         let mut total_torque = Vector3::zeros();
 
-        // Loop over each triangular geometry chunk
-        for chunk in mesh.indices.chunks_exact(3) {
-            // Retrieve vertices corresponding to index triplets
-            let v0 = mesh.vertices[chunk[0] as usize];
-            let v1 = mesh.vertices[chunk[1] as usize];
-            let v2 = mesh.vertices[chunk[2] as usize];
+        // LEEWARD (Base Drag / Wake) is independent of local mesh geometry.
+        // We compute it exactly once to avoid redundant stack math in the tight loop.
+        let leeward_cp = if freestream_mach < 0.8 {
+            -0.1
+        } else if freestream_mach < 1.2 {
+            let blend = (freestream_mach - 0.8) / 0.4;
+            let cp_sub = -0.1;
+            let cp_sup = -1.0 / (1.2 * 1.2);
+            cp_sub * (1.0 - blend) + cp_sup * blend
+        } else {
+            // Supersonic base pressure approximation
+            // As Mach increases, base pressure approaches a vacuum (-1/gamma*M^2)
+            -1.0 / (freestream_mach * freestream_mach)
+        };
 
-            // Define edges intersecting at v0 to find the surface normal and area
-            let edge1 = v1 - v0;
-            let edge2 = v2 - v0;
-            let cross = edge1.cross(&edge2);
-            let area = cross.magnitude() * 0.5;
-
+        // Iterate directly over precomputed surface properties instead of calculating
+        // cross products, square roots, and centroids 4 times per simulation step.
+        for face in &mesh.faces {
             // Cull degenerate triangles
-            if area < 1e-8 {
+            if face.area < 1e-8 {
                 continue;
             }
 
-            // Normal relative to the outbound facing mesh surface
-            let normal = cross.normalize();
-
-            // Geographic centroid of the individual triangle
-            let centroid = (v0 + v1 + v2) / 3.0;
-
             // Offset vector to the Center of Mass (used for localized velocities + torque)
-            let r = centroid - cm;
+            let r = face.centroid - cm;
 
             // Overall localized geometric velocity combines translation and planar rotation
             let v_local = v_inf + w.cross(&r);
@@ -258,31 +257,19 @@ impl AeroSolver {
 
             // The air flow direction is the opposite of the body's local geometric velocity
             let v_dir = -v_local / v_mag;
+
             // Calculate incidence angle alignment metric
             // Note: because normals point outward, a negative dot product indicates
             // the airflow is striking the face directly (windward side).
-            let cos_theta = normal.dot(&v_dir);
+            let cos_theta = face.normal.dot(&v_dir);
 
             // Determine local pressure coefficient (C_p)
             let c_p = if cos_theta < 0.0 {
                 // WINDWARD
                 calc_windward_cp(cos_theta.abs(), local_mach)
             } else {
-                // LEEWARD (Base Drag / Wake)
-                // We blend from subsonic separation (-0.1) to supersonic vacuum (-1/M^2)
-                // across the transonic regime (0.8 to 1.2 Mach).
-                if freestream_mach < 0.8 {
-                    -0.1
-                } else if freestream_mach < 1.2 {
-                    let blend = (freestream_mach - 0.8) / 0.4;
-                    let cp_sub = -0.1;
-                    let cp_sup = -1.0 / (1.2 * 1.2);
-                    cp_sub * (1.0 - blend) + cp_sup * blend
-                } else {
-                    // Supersonic base pressure approximation
-                    // As Mach increases, base pressure approaches a vacuum (-1/gamma*M^2)
-                    -1.0 / (freestream_mach * freestream_mach)
-                }
+                // LEEWARD / WAKE
+                leeward_cp
             };
 
             // Calculate the boundary-layer distinct Reynolds number across the element
@@ -300,17 +287,17 @@ impl AeroSolver {
             let q = 0.5 * air_density * v_mag * v_mag;
 
             // Resolve the force pushing inwardly perpendicular to the surface
-            let force_normal = -normal * (q * c_p * area);
+            let force_normal = -face.normal * (q * c_p * face.area);
 
             // Calculate the velocity component wiping across the tangent plane
-            let v_tangent = v_dir - normal * cos_theta;
+            let v_tangent = v_dir - face.normal * cos_theta;
             let v_tangent_mag = v_tangent.norm();
 
             // Compute sliding shear/friction opposing the planar movement direction
             let force_tangent = if v_tangent_mag > 1e-6 {
                 let tangent_dir = v_tangent / v_tangent_mag;
                 // v_dir is the airflow direction, so skin friction pulls the body IN the airflow direction.
-                tangent_dir * (q * c_f * area)
+                tangent_dir * (q * c_f * face.area)
             } else {
                 Vector3::zeros()
             };

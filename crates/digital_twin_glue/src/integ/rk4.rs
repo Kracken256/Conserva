@@ -21,16 +21,16 @@ impl Rk4 {
     ) -> (Vector3<f64>, Vector3<f64>, Vector3<f64>, Quaternion<f64>)
     where
         F: FnMut(
-            &Vector3<f64>,
-            &Vector3<f64>,
-            &Quaternion<f64>,
-            &Vector3<f64>,
+            Vector3<f64>,
+            Vector3<f64>,
+            Quaternion<f64>,
+            Vector3<f64>,
         ) -> (Vector3<f64>, Vector3<f64>),
     {
         let q_u = UnitQuaternion::new_normalize(q);
 
         // 1. SAMPLE PHYSICS: Get forces for this specific intermediate state
-        let (force_body, torque_body) = get_forces(&v, &w, &q, &p);
+        let (force_body, torque_body) = get_forces(v, w, q, p);
 
         // 2. KINEMATICS
         let dp = q_u * v;
@@ -52,10 +52,10 @@ impl Rk4 {
     pub fn step<F>(&mut self, state: &MissileState, mut get_forces: F, dt: f64) -> MissileState
     where
         F: FnMut(
-            &Vector3<f64>,
-            &Vector3<f64>,
-            &Quaternion<f64>,
-            &Vector3<f64>,
+            Vector3<f64>,
+            Vector3<f64>,
+            Quaternion<f64>,
+            Vector3<f64>,
         ) -> (Vector3<f64>, Vector3<f64>),
     {
         let mass = state.current_mass.value;
@@ -148,7 +148,7 @@ mod tests {
 
         // No aerodynamic/body forces or torques; only gravity should appear in dv.
         let mut get_forces =
-            |_v: &Vector3<f64>, _w: &Vector3<f64>, _q: &Quaternion<f64>, _p: &Vector3<f64>| {
+            |_v: Vector3<f64>, _w: Vector3<f64>, _q: Quaternion<f64>, _p: Vector3<f64>| {
                 (Vector3::zeros(), Vector3::zeros())
             };
 
