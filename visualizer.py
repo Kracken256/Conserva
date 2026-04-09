@@ -140,7 +140,7 @@ if __name__ == '__main__':
             # nalgebra / rust produces q = w + xi + yj + zk
             # ursina uses generic quaternion representations.
             # Depending on coordinate handedness, we assign the rotation
-            rocket.quaternion = Quat(w, i, k, j)
+            rocket.quaternion = Quat(w, i, j, k)
 
             vel = latest_state['vel']
 
@@ -159,23 +159,23 @@ if __name__ == '__main__':
             )
 
         # --- RUN EVERY RENDER FRAME (60Hz+) ---
-        # Auto-framing camera to always keep the ground, target, and rocket all in view simultaneously
-        center_x = (rocket.x + target_waypoint.x) / 2.0
-        center_y = (rocket.y + target_waypoint.y) / 2.0
-        center_z = (rocket.z + target_waypoint.z) / 2.0
+        # Auto-framing camera heavily weighted towards the rocket to keep it close
+        center_x = rocket.x * 0.8 + target_waypoint.x * 0.2
+        center_y = rocket.y * 0.8 + target_waypoint.y * 0.2
+        center_z = rocket.z * 0.8 + target_waypoint.z * 0.2
 
         # Calculate absolute distance between the two bodies
         dist = distance(rocket.position, target_waypoint.position)
 
-        # Base height padding ensures we never zoom in too close at the end
-        padding = max(dist * 1.5, 1200.0)
+        # Significantly reduced padding to make the camera much closer to the missile
+        padding = max(dist * 0.4, 80.0)
 
-        desired_pos = Vec3(center_x, center_y + padding * 0.8,
+        desired_pos = Vec3(center_x, center_y + padding * 0.5,
                            center_z - padding)
 
         camera.position = lerp(camera.position, desired_pos, time.dt * 5.0)
 
-        # Look straight at the midpoint between the rocket and the target
-        camera.look_at(Vec3(center_x, center_y, center_z))
+        # Look straight at the rocket itself rather than the empty midpoint
+        camera.look_at(rocket.position)
 
     app.run()
