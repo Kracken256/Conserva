@@ -230,3 +230,52 @@ impl MeshGenerator for TheMeshGenerator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::defaults::{get_default_config, get_initial_state};
+
+    /// Ensure that the generated mesh treats +Z as the rocket's longitudinal
+    /// axis, with the nose tip located at the maximum Z value and centered
+    /// around X = Y = 0. This couples the geometric model to the body-frame
+    /// convention used by the physics and controller.
+    #[test]
+    fn mesh_nose_is_aligned_with_body_z_axis() {
+        let state = get_initial_state();
+        let config = get_default_config();
+        let mut mesh = Mesh::default();
+        let generator = TheMeshGenerator::default();
+
+        generator.generate(&state, &config, &mut mesh);
+
+        assert!(!mesh.vertices.is_empty(), "mesh should contain vertices");
+
+        // Find the maximum Z value in the mesh.
+        let max_z = mesh
+            .vertices
+            .iter()
+            .map(|v| v.z)
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(max_z.is_finite());
+
+        // Collect all vertices that are effectively at the nose tip (max Z).
+        let tip_verts: Vec<_> = mesh
+            .vertices
+            .iter()
+            .filter(|v| (max_z - v.z).abs() < 1e-6)
+            .collect();
+
+        assert!(
+            !tip_verts.is_empty(),
+            "expected at least one vertex at the nose tip (max Z)"
+        );
+
+        let avg_x = tip_verts.iter().map(|v| v.x).sum::<f64>() / tip_verts.len() as f64;
+        let avg_y = tip_verts.iter().map(|v| v.y).sum::<f64>() / tip_verts.len() as f64;
+
+        // Nose tip should lie very close to the +Z axis.
+        assert!(avg_x.abs() < 1e-3, "nose tip x not near zero: {}", avg_x);
+        assert!(avg_y.abs() < 1e-3, "nose tip y not near zero: {}", avg_y);
+    }
+}

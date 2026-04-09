@@ -191,6 +191,52 @@ impl FlightComputer {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::defaults::{get_default_config, get_initial_state};
+
+    /// When the rocket is already aligned with the waypoint straight ahead
+    /// along the body +Z axis, the guidance law should not command any
+    /// lateral pitch/yaw rates. This locks in the convention that body +Z
+    /// is the forward axis used by the controller.
+    #[test]
+    fn waypoint_directly_ahead_requires_no_lateral_command() {
+        let state = get_initial_state();
+        let config = get_default_config();
+
+        // Place the waypoint directly in front of the rocket along +Z in world
+        // (rocket starts at the origin with identity orientation).
+        let waypoint = Some(Vector3::new(
+            Length::new::<meter>(0.0),
+            Length::new::<meter>(0.0),
+            Length::new::<meter>(1_000.0),
+        ));
+
+        let mut fc = FlightComputer::new(config, waypoint);
+
+        // One small guidance tick.
+        let dt = 0.01;
+        let new_state = fc.tick(&state, dt);
+
+        let pitch = new_state.tvc_angles[0].get::<radian>();
+        let yaw = new_state.tvc_angles[1].get::<radian>();
+
+        // If +Z is truly the forward axis used by the guidance law, both
+        // commanded gimbal angles should be (numerically) very close to zero.
+        assert!(
+            pitch.abs() < 1e-6,
+            "expected near-zero pitch gimbal, got {}",
+            pitch
+        );
+        assert!(
+            yaw.abs() < 1e-6,
+            "expected near-zero yaw gimbal, got {}",
+            yaw
+        );
+    }
+}
+
 pub struct TheRocket {
     pub fc: FlightComputer,
 }

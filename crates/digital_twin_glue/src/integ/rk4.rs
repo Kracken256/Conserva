@@ -126,3 +126,47 @@ impl Rk4 {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify that the integrator interprets the body frame and world frame
+    /// consistently with the documented conventions:
+    /// - World Z is "up" (gravity points toward -Z in world and body when q = I).
+    /// - Body +Z is the rocket's forward axis, so dp = q * v maps body +Z to world +Z.
+    #[test]
+    fn body_and_world_axes_conventions_are_consistent() {
+        // Body-frame linear velocity: 1 m/s along body +Z (rocket nose).
+        let v_body = Vector3::new(0.0, 0.0, 1.0);
+        let w = Vector3::new(0.0, 0.0, 0.0);
+        let p = Vector3::new(0.0, 0.0, 0.0);
+        let mass = 1.0;
+        let inertia = Matrix3::identity();
+        let inertia_inv = Matrix3::identity();
+        let q = Quaternion::identity();
+
+        // No aerodynamic/body forces or torques; only gravity should appear in dv.
+        let mut get_forces =
+            |_v: &Vector3<f64>, _w: &Vector3<f64>, _q: &Quaternion<f64>, _p: &Vector3<f64>| {
+                (Vector3::zeros(), Vector3::zeros())
+            };
+
+        let (dp, dv, _dw, _dq) = Rk4::compute_derivatives(
+            v_body,
+            w,
+            q,
+            p,
+            mass,
+            &inertia,
+            &inertia_inv,
+            &mut get_forces,
+        );
+
+        // With q = I, body +Z should map directly to world +Z.
+        assert!((dp - Vector3::new(0.0, 0.0, 1.0)).norm() < 1e-12);
+
+        // With q = I, gravity_world = (0,0,-9.81) should appear unchanged in body frame.
+        assert!((dv - Vector3::new(0.0, 0.0, -9.81)).norm() < 1e-12);
+    }
+}
