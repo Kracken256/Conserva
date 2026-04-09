@@ -1,3 +1,11 @@
+[workspace]
+members = [
+    ".",
+    "crates/digital_twin",
+    "crates/digital_twin_glue",
+    "crates/tuner",
+]
+
 [package]
 name = "Conserva"
 version = "0.1.0"

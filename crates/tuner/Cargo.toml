@@ -1,0 +1,13 @@
+[package]
+name = "tuner"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+digital_twin = { path = "../digital_twin" }
+digital_twin_glue = { path = "../digital_twin_glue" }
+uom = { version = "0.38.0", features = ["serde"] }
+nalgebra = "0.34"
+rand = "0.8"
+rayon = "1.11.0"
+indicatif = "0.18.4"
