@@ -64,7 +64,7 @@ impl DigitalTwin {
                 sub_state.orientation = UnitQuaternion::from_quaternion(*q);
 
                 // Convert world-frame wind to body-frame and compute relative airspeed
-                let wind_body_f64 = sub_state.orientation.inverse()
+                let wind_body_f64 = sub_state.orientation.conjugate()
                     * self.wind_velocity.map(|v| v.get::<meter_per_second>());
                 let wind_body_vel = wind_body_f64.map(Velocity::new::<meter_per_second>);
                 sub_state.body_velocity -= wind_body_vel;

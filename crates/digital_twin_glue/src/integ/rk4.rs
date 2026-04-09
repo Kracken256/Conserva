@@ -37,7 +37,7 @@ impl Rk4 {
 
         // 3. LINEAR DYNAMICS (Body Frame)
         let gravity_world = Vector3::new(0.0, 0.0, -9.81);
-        let gravity_body = q_u.inverse() * gravity_world;
+        let gravity_body = q_u.conjugate() * gravity_world;
         let dv = (force_body / mass) + gravity_body - w.cross(&v);
 
         // 4. ROTATIONAL DYNAMICS (Body Frame)
