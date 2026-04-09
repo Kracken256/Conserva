@@ -106,6 +106,7 @@ pub fn get_default_config() -> MissileConfig {
             ],
             max_tvc_angle: Angle::new::<radian>(20.0_f64.to_radians()),
             tvc_slew_rate: AngularVelocity::new::<radian_per_second>(60.0_f64.to_radians()),
+            tvc_activation_delay: Time::new::<second>(0.05), // 50ms PT1 delay constant
         },
     }
 }

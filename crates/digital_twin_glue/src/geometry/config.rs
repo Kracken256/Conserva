@@ -80,6 +80,11 @@ pub struct MissileEngineConfig {
     /// meaning large commands take several milliseconds to execute. Modeling this constraint prevents
     /// the simulation from performing impossible instantaneous control surface snaps.
     pub tvc_slew_rate: AngularVelocity,
+    /// The exponential time constant (tau) defining the first-order lag of the TVC actuator's
+    /// response from an idle or steady state towards the newly commanded displacement. This latency
+    /// bounds the electromechanical settling delay inherent to physical servo systems translating
+    /// voltages into momentum. A non-zero value cushions abrupt PID step commands dynamically.
+    pub tvc_activation_delay: Time,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

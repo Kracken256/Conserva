@@ -128,14 +128,28 @@ impl FlightComputer {
         let target_pitch = (-pitch_cmd).clamp(-max_gimbal, max_gimbal);
         let target_yaw = (-yaw_cmd).clamp(-max_gimbal, max_gimbal);
 
-        // Account for TVC rotation slew rate preventing instantaneous "snaps"
+        // Account for TVC latency (first-order lag models the mechanical settling delay)
         let current_pitch = state.tvc_angles[0].get::<radian>();
         let current_yaw = state.tvc_angles[1].get::<radian>();
+
+        let tau = self.config.engine.tvc_activation_delay.get::<second>();
+        // alpha = 1.0 - exp(-dt / tau). Using a small tau approximation avoiding div-by-zero.
+        let alpha = if tau > 1e-6 {
+            1.0 - (-dt / tau).exp()
+        } else {
+            1.0
+        };
+
+        let lagged_target_pitch = current_pitch + (target_pitch - current_pitch) * alpha;
+        let lagged_target_yaw = current_yaw + (target_yaw - current_yaw) * alpha;
+
+        // Account for TVC rotation slew rate preventing instantaneous "snaps"
         let max_delta = self.config.engine.tvc_slew_rate.get::<radian_per_second>() * dt;
 
         let pitch_actuated =
-            current_pitch + (target_pitch - current_pitch).clamp(-max_delta, max_delta);
-        let yaw_actuated = current_yaw + (target_yaw - current_yaw).clamp(-max_delta, max_delta);
+            current_pitch + (lagged_target_pitch - current_pitch).clamp(-max_delta, max_delta);
+        let yaw_actuated =
+            current_yaw + (lagged_target_yaw - current_yaw).clamp(-max_delta, max_delta);
 
         new_state.tvc_angles[0] = Angle::new::<radian>(pitch_actuated);
         new_state.tvc_angles[1] = Angle::new::<radian>(yaw_actuated);
