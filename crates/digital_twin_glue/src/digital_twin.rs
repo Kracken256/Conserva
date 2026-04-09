@@ -75,8 +75,17 @@ impl DigitalTwin {
                 let tvc_rotation = Rotation3::from_euler_angles(tvc_pitch, tvc_yaw, 0.0);
                 let active_thrust = tvc_rotation * thrust_base;
 
-                // Introduce rotational torque from off-axis thrust (assuming nozzle is at rear ~ -1.0m from CG)
-                let nozzle_offset = Vector3::new(0.0, 0.0, -1.0);
+                // Calculate dynamic Center of Gravity (CoG)
+                let body_length = self.config.body_length.get::<meter>();
+                let dry_m = sub_state.dry_mass.value;
+                let prop_m = sub_state.propellant_mass.value;
+                // Assume dry mass center is at geometric z=0 (middle)
+                // Assume propellant mass center is at z = -body_length / 4.0 (lower half)
+                let cg_z = (0.0 * dry_m + (-body_length / 4.0) * prop_m) / (dry_m + prop_m);
+
+                // Introduce rotational torque from off-axis thrust relative to current CoG
+                // Nozzle is at the base of the rocket (-body_length/2.0 from geometric center)
+                let nozzle_offset = Vector3::new(0.0, 0.0, -body_length / 2.0 - cg_z);
                 let motor_torque = nozzle_offset.cross(&active_thrust);
 
                 (output.force + active_thrust, output.torque + motor_torque)
