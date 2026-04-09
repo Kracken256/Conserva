@@ -90,10 +90,10 @@ pub fn get_default_config() -> MissileConfig {
             ],
         },
         controller: MissileControllerConfig {
-            pitch_pid_kp: 0.365516,
+            pitch_pid_kp: 0.264091,
             pitch_pid_ki: 0.100000,
             pitch_pid_kd: 0.000000,
-            yaw_pid_kp: 0.365516,
+            yaw_pid_kp: 0.264091,
             yaw_pid_ki: 0.100000,
             yaw_pid_kd: 0.000000,
         },
