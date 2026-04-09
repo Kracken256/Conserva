@@ -89,6 +89,13 @@ fn main() {
 
     let mut twin = DigitalTwin::new(config, state, Box::new(mesh_generator), Box::new(rocket));
 
+    // Add strong crosswind to test control stability (e.g. 25 m/s or ~55 mph)
+    twin.wind_velocity = Vector3::new(
+        uom::si::f64::Velocity::new::<meter_per_second>(25.0),
+        uom::si::f64::Velocity::new::<meter_per_second>(-10.0),
+        uom::si::f64::Velocity::new::<meter_per_second>(0.0),
+    );
+
     let mut last_frame_time = Instant::now();
     let mut last_print_time = Instant::now();
     let mut last_dump_time = Instant::now();
