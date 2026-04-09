@@ -6,7 +6,7 @@ use crate::integ;
 use crate::physics::solver::AeroSolver;
 use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 use uom::si::angular_velocity::{AngularVelocity, radian_per_second};
-use uom::si::f32::{Length, Velocity};
+use uom::si::f64::{Length, Velocity};
 use uom::si::length::meter;
 use uom::si::velocity::meter_per_second;
 
@@ -39,18 +39,18 @@ impl DigitalTwin {
         }
     }
 
-    pub fn step(&mut self, dt: f32) {
+    pub fn step(&mut self, dt: f64) {
         // 1. Update Rocket first (to get new fin angles/thrust settings)
         // The FC sets the "intent" for the next step.
         self.state = self.rocket.update(&self.state, dt);
 
         // 2. Define the "System Dynamics"
         let physics_engine =
-            |v: &Vector3<f32>, w: &Vector3<f32>, q: &Quaternion<f32>, p: &Vector3<f32>| {
+            |v: &Vector3<f64>, w: &Vector3<f64>, q: &Quaternion<f64>, p: &Vector3<f64>| {
                 // Create a temporary state for the sub-step
                 let mut sub_state = self.state.clone();
 
-                // Map raw f32s back into uom quantities
+                // Map raw f64s back into uom quantities
                 sub_state.position = p.map(Length::new::<meter>);
                 sub_state.body_velocity = v.map(Velocity::new::<meter_per_second>);
                 sub_state.angular_velocity = w.map(AngularVelocity::new::<radian_per_second>);

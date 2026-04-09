@@ -4,7 +4,7 @@ use nalgebra::Vector3;
 
 #[derive(Clone, Default)]
 pub struct Mesh {
-    pub vertices: Vec<Vector3<f32>>,
+    pub vertices: Vec<Vector3<f64>>,
     pub indices: Vec<u32>,
 }
 

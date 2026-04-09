@@ -2,7 +2,7 @@ use digital_twin_glue::prelude::*;
 use nalgebra::{Matrix3, UnitQuaternion};
 use uom::si::angle::radian;
 use uom::si::angular_velocity::radian_per_second;
-use uom::si::f32::{Angle, AngularVelocity, Force, Length, Mass, Time, Velocity};
+use uom::si::f64::{Angle, AngularVelocity, Force, Length, Mass, Time, Velocity};
 use uom::si::force::newton;
 use uom::si::length::meter;
 use uom::si::mass::kilogram;
@@ -14,7 +14,7 @@ pub fn get_initial_state() -> MissileState {
         position: [
             Length::new::<meter>(0.0),
             Length::new::<meter>(0.0),
-            Length::new::<meter>(0.0),
+            Length::new::<meter>(10000.0),
         ]
         .into(),
         body_velocity: [
@@ -33,7 +33,8 @@ pub fn get_initial_state() -> MissileState {
         fin_angles: [Angle::new::<radian>(0.0); 4],
         tvc_angles: [Angle::new::<radian>(0.0); 2],
         mass: Mass::new::<kilogram>(100.0),
-        inertia_tensor: Matrix3::identity(),
+        // For a 3m diameter (1.5m radius) sphere at 100kg, I = 2/5 * m * R^2 = 0.4 * 100 * 2.25 = 90.0
+        inertia_tensor: Matrix3::new(90.0, 0.0, 0.0, 0.0, 90.0, 0.0, 0.0, 0.0, 90.0),
     }
 }
 

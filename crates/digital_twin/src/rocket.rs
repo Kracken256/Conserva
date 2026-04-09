@@ -4,7 +4,7 @@ use digital_twin_glue::prelude::*;
 pub struct TheRocket {}
 
 impl Rocket for TheRocket {
-    fn update(&mut self, state: &MissileState, dt: f32) -> MissileState {
+    fn update(&mut self, state: &MissileState, dt: f64) -> MissileState {
         // TODO: Write flight computer logic here. For now, just return the input state.
         state.clone()
     }

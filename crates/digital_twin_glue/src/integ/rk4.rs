@@ -1,7 +1,7 @@
 use crate::control::state::MissileState;
 use nalgebra::{Matrix3, Quaternion, UnitQuaternion, Vector3};
 use uom::si::angular_velocity::radian_per_second;
-use uom::si::f32::{AngularVelocity, Length, Velocity};
+use uom::si::f64::{AngularVelocity, Length, Velocity};
 use uom::si::length::meter;
 use uom::si::velocity::meter_per_second;
 
@@ -10,22 +10,22 @@ pub struct Rk4 {}
 impl Rk4 {
     #[inline]
     fn compute_derivatives<F>(
-        v: Vector3<f32>,
-        w: Vector3<f32>,
-        q: Quaternion<f32>,
-        p: Vector3<f32>,
-        mass: f32,
-        inertia: &Matrix3<f32>,
-        inertia_inv: &Matrix3<f32>,
+        v: Vector3<f64>,
+        w: Vector3<f64>,
+        q: Quaternion<f64>,
+        p: Vector3<f64>,
+        mass: f64,
+        inertia: &Matrix3<f64>,
+        inertia_inv: &Matrix3<f64>,
         mut get_forces: F,
-    ) -> (Vector3<f32>, Vector3<f32>, Vector3<f32>, Quaternion<f32>)
+    ) -> (Vector3<f64>, Vector3<f64>, Vector3<f64>, Quaternion<f64>)
     where
         F: FnMut(
-            &Vector3<f32>,
-            &Vector3<f32>,
-            &Quaternion<f32>,
-            &Vector3<f32>,
-        ) -> (Vector3<f32>, Vector3<f32>),
+            &Vector3<f64>,
+            &Vector3<f64>,
+            &Quaternion<f64>,
+            &Vector3<f64>,
+        ) -> (Vector3<f64>, Vector3<f64>),
     {
         let q_u = UnitQuaternion::new_normalize(q);
 
@@ -49,14 +49,14 @@ impl Rk4 {
         (dp, dv, dw, dq)
     }
 
-    pub fn step<F>(&mut self, state: &MissileState, mut get_forces: F, dt: f32) -> MissileState
+    pub fn step<F>(&mut self, state: &MissileState, mut get_forces: F, dt: f64) -> MissileState
     where
         F: FnMut(
-            &Vector3<f32>,
-            &Vector3<f32>,
-            &Quaternion<f32>,
-            &Vector3<f32>,
-        ) -> (Vector3<f32>, Vector3<f32>),
+            &Vector3<f64>,
+            &Vector3<f64>,
+            &Quaternion<f64>,
+            &Vector3<f64>,
+        ) -> (Vector3<f64>, Vector3<f64>),
     {
         let mass = state.mass.value;
         let inertia = state.inertia_tensor;

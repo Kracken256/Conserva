@@ -4,7 +4,7 @@ use nalgebra::Vector3;
 /// A simplified standard atmosphere table.
 /// Columns: (Altitude [m], Density [kg/m^3], Speed of Sound [m/s], Dynamic Viscosity [kg/(m·s)])
 /// This table is used to estimate ambient flight conditions at a given altitude.
-const ATMOSPHERE_TABLE: &[(f32, f32, f32, f32)] = &[
+const ATMOSPHERE_TABLE: &[(f64, f64, f64, f64)] = &[
     (0.0, 1.225, 340.29, 1.789e-5),
     (2000.0, 1.007, 332.53, 1.726e-5),
     (4000.0, 0.819, 324.59, 1.661e-5),
@@ -27,7 +27,7 @@ const ATMOSPHERE_TABLE: &[(f32, f32, f32, f32)] = &[
 ///
 /// # Returns
 /// A tuple containing `(density, speed_of_sound, dynamic_viscosity)`.
-fn lookup_atmosphere(altitude: f32) -> (f32, f32, f32) {
+fn lookup_atmosphere(altitude: f64) -> (f64, f64, f64) {
     // Above 100km (Karman line), we assume negligible atmosphere.
     if altitude > 100_000.0 {
         return (1e-12, 280.0, 1.3e-5);
@@ -108,8 +108,8 @@ impl AeroSolver for TheSolver {
             let mach_blend = (freestream_mach - 0.8) / 0.4;
 
             // Anchor values evaluated exactly at Mach 0.8 and Mach 1.2 boundaries
-            let cp_sub_coef = 2.0 / (1.0 - 0.64_f32).sqrt(); // Mach 0.8
-            let cp_sup_coef = 2.0 / (1.44_f32 - 1.0).sqrt(); // Mach 1.2
+            let cp_sub_coef = 2.0 / (1.0 - 0.64_f64).sqrt(); // Mach 0.8
+            let cp_sup_coef = 2.0 / (1.44_f64 - 1.0).sqrt(); // Mach 1.2
 
             let cp_blend = cp_sub_coef * (1.0 - mach_blend) + cp_sup_coef * mach_blend;
 
@@ -149,7 +149,7 @@ impl AeroSolver for TheSolver {
             let blend = ((freestream_mach - 5.0) / 2.0).clamp(0.0, 1.0);
 
             // Fixed reference boundary evaluated at Mach 5
-            let beta_5 = (25.0_f32 - 1.0).sqrt();
+            let beta_5 = (25.0_f64 - 1.0).sqrt();
 
             Self::integrate_mesh(
                 mesh,
@@ -192,18 +192,18 @@ impl TheSolver {
     #[inline(always)]
     fn integrate_mesh<F>(
         mesh: &Mesh,
-        cm: Vector3<f32>,
-        v_inf: Vector3<f32>,
-        w: Vector3<f32>,
-        speed_of_sound: f32,
-        air_density: f32,
-        dyn_viscosity: f32,
-        length_ref: f32,
-        freestream_mach: f32,
+        cm: Vector3<f64>,
+        v_inf: Vector3<f64>,
+        w: Vector3<f64>,
+        speed_of_sound: f64,
+        air_density: f64,
+        dyn_viscosity: f64,
+        length_ref: f64,
+        freestream_mach: f64,
         calc_windward_cp: F,
     ) -> SolverOutput
     where
-        F: Fn(f32, f32) -> f32,
+        F: Fn(f64, f64) -> f64,
     {
         let mut total_force = Vector3::zeros();
         let mut total_torque = Vector3::zeros();
@@ -299,7 +299,8 @@ impl TheSolver {
             // Compute sliding shear/friction opposing the planar movement direction
             let force_tangent = if v_tangent_mag > 1e-6 {
                 let tangent_dir = v_tangent / v_tangent_mag;
-                -tangent_dir * (q * c_f * area)
+                // v_dir is the airflow direction, so skin friction pulls the body IN the airflow direction.
+                tangent_dir * (q * c_f * area)
             } else {
                 Vector3::zeros()
             };

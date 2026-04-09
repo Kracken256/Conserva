@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uom::si::f32::{Force, Length, Time};
+use uom::si::f64::{Force, Length, Time};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MissileConfig {
