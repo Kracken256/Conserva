@@ -159,24 +159,23 @@ if __name__ == '__main__':
             )
 
         # --- RUN EVERY RENDER FRAME (60Hz+) ---
-        # Auto-framing camera to always keep the ground path in view
-        # We calculate this every frame to ensure smooth camera movement
-        # even if telemetry operates at a lower frequency than graphics frame rate.
-        min_x = min(0, target_waypoint.x, rocket.x)
-        max_x = max(0, target_waypoint.x, rocket.x)
-        min_z = min(0, target_waypoint.z, rocket.z)
-        max_z = max(0, target_waypoint.z, rocket.z)
+        # Auto-framing camera to always keep the ground, target, and rocket all in view simultaneously
+        center_x = (rocket.x + target_waypoint.x) / 2.0
+        center_y = (rocket.y + target_waypoint.y) / 2.0
+        center_z = (rocket.z + target_waypoint.z) / 2.0
 
-        center_x = (min_x + max_x) / 2.0
-        center_z = (min_z + max_z) / 2.0
-        size = max(max_x - min_x, max_z - min_z)
+        # Calculate absolute distance between the two bodies
+        dist = distance(rocket.position, target_waypoint.position)
 
-        target_height = max(rocket.y + max(400.0, rocket.y * 1.5), size * 2.0)
-        desired_pos = Vec3(center_x, target_height,
-                           center_z - (target_height * 0.5))
+        # Base height padding ensures we never zoom in too close at the end
+        padding = max(dist * 1.5, 1200.0)
 
-        camera.position = lerp(camera.position, desired_pos, time.dt * 10.0)
-        desired_look = Vec3(center_x, rocket.y * 0.25, center_z)
-        camera.look_at(desired_look)
+        desired_pos = Vec3(center_x, center_y + padding * 0.8,
+                           center_z - padding)
+
+        camera.position = lerp(camera.position, desired_pos, time.dt * 5.0)
+
+        # Look straight at the midpoint between the rocket and the target
+        camera.look_at(Vec3(center_x, center_y, center_z))
 
     app.run()
