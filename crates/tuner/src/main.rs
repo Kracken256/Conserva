@@ -142,6 +142,12 @@ fn main() {
         })
         .collect();
 
+    println!(
+        "Starting PSO optimization with {} particles for {} epochs...",
+        num_particles, epochs
+    );
+    println!("Initial random positions (Kp, Ki, Kd):");
+
     let mut global_best_params = particles[0].position;
     let mut global_best_score = f64::MAX;
 
