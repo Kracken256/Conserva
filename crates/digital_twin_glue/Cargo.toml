@@ -7,3 +7,4 @@ edition = "2024"
 nalgebra = { version = "0.34", features = ["serde-serialize"] }
 serde = { version = "1.0", features = ["derive"] }
 uom = { version = "0.38.0", features = ["serde"] }
+wide = { version = "1.2.0", features = ["std"] }

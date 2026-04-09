@@ -3,17 +3,43 @@ use crate::geometry::config::MissileConfig;
 use nalgebra::Vector3;
 
 #[derive(Clone, Default, Debug)]
-pub struct MeshFace {
-    pub normal: Vector3<f64>,
-    pub centroid: Vector3<f64>,
-    pub area: f64,
+pub struct MeshFacesSoA {
+    pub normal_x: Vec<f64>,
+    pub normal_y: Vec<f64>,
+    pub normal_z: Vec<f64>,
+    pub centroid_x: Vec<f64>,
+    pub centroid_y: Vec<f64>,
+    pub centroid_z: Vec<f64>,
+    pub area: Vec<f64>,
+}
+
+impl MeshFacesSoA {
+    pub fn clear(&mut self) {
+        self.normal_x.clear();
+        self.normal_y.clear();
+        self.normal_z.clear();
+        self.centroid_x.clear();
+        self.centroid_y.clear();
+        self.centroid_z.clear();
+        self.area.clear();
+    }
+
+    pub fn reserve(&mut self, capacity: usize) {
+        self.normal_x.reserve(capacity);
+        self.normal_y.reserve(capacity);
+        self.normal_z.reserve(capacity);
+        self.centroid_x.reserve(capacity);
+        self.centroid_y.reserve(capacity);
+        self.centroid_z.reserve(capacity);
+        self.area.reserve(capacity);
+    }
 }
 
 #[derive(Clone, Default)]
 pub struct Mesh {
     pub vertices: Vec<Vector3<f64>>,
     pub indices: Vec<u32>,
-    pub faces: Vec<MeshFace>,
+    pub faces: MeshFacesSoA,
 }
 
 impl Mesh {
@@ -40,11 +66,13 @@ impl Mesh {
                 (Vector3::zeros(), Vector3::zeros())
             };
 
-            self.faces.push(MeshFace {
-                normal,
-                centroid,
-                area,
-            });
+            self.faces.normal_x.push(normal.x);
+            self.faces.normal_y.push(normal.y);
+            self.faces.normal_z.push(normal.z);
+            self.faces.centroid_x.push(centroid.x);
+            self.faces.centroid_y.push(centroid.y);
+            self.faces.centroid_z.push(centroid.z);
+            self.faces.area.push(area);
         }
     }
 }
