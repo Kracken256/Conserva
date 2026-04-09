@@ -54,6 +54,9 @@ fn main() {
     let mut last_frame_time = Instant::now();
     let mut last_print_time = Instant::now();
 
+    // Slow down simulation relative to real time (e.g., 0.25x speed)
+    let time_scale = 1.0;
+
     loop {
         // 1. Calculate how much real time has passed since the last loop iteration
         let now = Instant::now();
@@ -63,7 +66,7 @@ fn main() {
         // 2. Step the physics engine by that exact amount
         // We limit dt to max 0.01s (10ms) per step to prevent RK4 numerical explosion from large angular rates
         // If the frame takes longer due to CPU load, the simulation will just slow down instead of accumulating NaNs.
-        let sim_dt = dt.min(0.01);
+        let sim_dt = dt.min(0.01) * time_scale;
         if sim_dt > 0.0 {
             twin.step(sim_dt);
         }
