@@ -11,7 +11,7 @@ fn print_state(state: &MissileState, target: Option<Vector3<uom::si::f64::Length
 
     let target_str = if let Some(t) = target {
         format!(
-            "[{}, {}, {}]",
+            "[{:.06}, {:.06}, {:.06}]",
             t[0].get::<meter>(),
             t[1].get::<meter>(),
             t[2].get::<meter>()
@@ -21,7 +21,7 @@ fn print_state(state: &MissileState, target: Option<Vector3<uom::si::f64::Length
     };
 
     println!(
-        "{{\"pos\": [{}, {}, {}], \"vel\": [{}, {}, {}], \"ori\": [{}, {}, {}, {}], \"target\": {}}}",
+        "{{\"pos\": [{:.06}, {:.06}, {:.06}], \"vel\": [{:.06}, {:.06}, {:.06}], \"ori\": [{:.06}, {:.06}, {:.06}, {:.06}], \"target\": {}}}",
         state.position[0].get::<meter>(),
         state.position[1].get::<meter>(),
         state.position[2].get::<meter>(),
@@ -64,9 +64,9 @@ fn main() {
         last_frame_time = now;
 
         // 2. Step the physics engine by that exact amount
-        // We limit dt to max 0.01s (10ms) per step to prevent RK4 numerical explosion from large angular rates
+        // We limit dt to max 0.001s (1ms) per step to prevent RK4 numerical explosion from large angular rates
         // If the frame takes longer due to CPU load, the simulation will just slow down instead of accumulating NaNs.
-        let sim_dt = dt.min(0.01) * time_scale;
+        let sim_dt = dt.min(0.001) * time_scale;
         if sim_dt > 0.0 {
             twin.step(sim_dt);
         }
@@ -101,10 +101,6 @@ fn main() {
             print_state(&twin.state, waypoint);
             last_print_time = now;
         }
-
-        // 4. Optional: Yield to the OS to prevent 100% CPU usage
-        // A very tiny sleep keeps the loop responsive without hurting physics accuracy
-        std::thread::sleep(Duration::from_millis(1));
     }
 }
 
