@@ -7,3 +7,10 @@ edition = "2024"
 digital_twin_glue = { path = "../digital_twin_glue" }
 nalgebra = "0.34"
 uom = { version = "0.38.0", features = ["serde"] }
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "step_benchmark"
+harness = false
