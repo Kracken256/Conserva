@@ -1,5 +1,6 @@
 use digital_twin::prelude::*;
 use digital_twin_glue::prelude::*;
+use nalgebra::Vector3;
 use std::time::{Duration, Instant};
 use uom::si::angle::radian;
 use uom::si::angular_velocity::radian_per_second;
@@ -60,17 +61,17 @@ fn print_state(state: &MissileState) {
 fn main() {
     let state = get_initial_state();
     let config = get_default_config();
-    let solver = TheSolver::default();
     let mesh_generator = TheMeshGenerator::default();
-    let rocket = TheRocket::default();
 
-    let mut twin = DigitalTwin::new(
-        config,
-        state,
-        Box::new(solver),
-        Box::new(mesh_generator),
-        Box::new(rocket),
-    );
+    // Give the rocket a waypoint coordinates input parameter (e.g. x: 1000m, y: 1000m, z: 0m)
+    let waypoint = Some(Vector3::new(
+        uom::si::f64::Length::new::<meter>(1000.0),
+        uom::si::f64::Length::new::<meter>(1000.0),
+        uom::si::f64::Length::new::<meter>(0.0),
+    ));
+    let rocket = TheRocket::new(config.clone(), waypoint);
+
+    let mut twin = DigitalTwin::new(config, state, Box::new(mesh_generator), Box::new(rocket));
 
     let mut last_frame_time = Instant::now();
     let mut last_print_time = Instant::now();

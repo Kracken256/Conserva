@@ -14,7 +14,7 @@ pub struct DigitalTwin {
     pub config: MissileConfig,
     pub state: MissileState,
     pub rocket: Box<dyn Rocket>,
-    pub solver: Box<dyn AeroSolver>,
+    pub solver: AeroSolver,
     pub mesh_generator: Box<dyn MeshGenerator>,
     pub current_mesh: Mesh,
     rk4: integ::rk4::Rk4,
@@ -24,14 +24,13 @@ impl DigitalTwin {
     pub fn new(
         config: MissileConfig,
         state: MissileState,
-        solver: Box<dyn AeroSolver>,
         mesh_generator: Box<dyn MeshGenerator>,
         rocket: Box<dyn Rocket>,
     ) -> Self {
         Self {
             config,
             state,
-            solver,
+            solver: AeroSolver {},
             mesh_generator,
             rocket,
             current_mesh: Mesh::default(),
