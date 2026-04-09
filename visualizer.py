@@ -102,82 +102,138 @@ if __name__ == '__main__':
                    thickness=2), color=color.cyan)
     trail_points = []
 
-    # Camera controller is disabled to prevent fighting with our auto-framing script
-    # and causing high-frequency vibration/ghosting.
-    # camera_controller = EditorCamera()
+    # Minecraft-style free camera
+    camera_controller = Entity(position=(0, 20, -50))
+    camera.parent = camera_controller
+    mouse.locked = True
 
-    # Start looking down at the world from high above
-    camera.position = (500, 3000, -500)
-    camera.look_at((500, 0, 500))
     # Extend the camera's far clipping plane so the ground doesn't disappear at high altitudes
     camera.clip_plane_far = 1000000
 
     # UI Elements for telemetry display
-    info_text = Text(text="Waiting for data...",
+    info_text = Text(text="Waiting for data...\nControls: [Space] Pause/Play  [R] Restart\n[Left/Right] Step  [F] Focus Rocket\n[WASD/Space/Ctrl] Fly  [Mouse] Look\n[Tab] Toggle Mouse Lock",
                      position=window.top_left, scale=1.5)
 
+    simulation_history = []
+    playback_index = 0
+    is_playing = True
+
+    def input(key):
+        global is_playing, playback_index
+        if key == 'space':
+            is_playing = not is_playing
+        elif key == 'r':
+            playback_index = 0
+            is_playing = True
+            trail_points.clear()
+            trail.model.vertices = []
+            trail.model.generate()
+        elif key == 'left arrow' or key == 'left arrow hold':
+            is_playing = False
+            playback_index = max(0, playback_index - 1)
+        elif key == 'right arrow' or key == 'right arrow hold':
+            is_playing = False
+            playback_index = min(
+                len(simulation_history) - 1, playback_index + 1)
+        elif key == 'f':
+            # Focus camera on the rocket
+            camera_controller.position = rocket.position - camera.forward * 50
+        elif key == 'escape' or key == 'tab':
+            # Toggle mouse lock for Minecraft-style freecam
+            mouse.locked = not mouse.locked
+
     def update():
-        # Empty queue fully every frame so we only show the freshest state
-        # (physics runs faster than graphics frame rate likely)
-        latest_state = None
+        global playback_index, is_playing
+
+        # Drain the queue to keep history updated
         while not data_queue.empty():
-            latest_state = data_queue.get()
+            simulation_history.append(data_queue.get())
 
-        if latest_state:
-            if 'target' in latest_state and latest_state['target'] is not None:
-                tx, ty, tz = latest_state['target']
-                target_waypoint.position = (tx, tz, ty)
+        if not simulation_history:
+            return
 
-            # Map standard aerospace coordinate frames (Z is up) to Ursina's game frame (Y is up)
-            # x_ursina = target_x
-            # y_ursina = target_z (up)
-            # z_ursina = target_y
-            pos = latest_state['pos']
-            ux, uy, uz = pos[0], pos[2], pos[1]
+        if is_playing:
+            playback_index += 1
+            if playback_index >= len(simulation_history):
+                playback_index = len(simulation_history) - 1
+                # Only pause automatically if the simulation actually finished (rust produced no more data)
+                # We can guess it's over if the thread is dead
+                if not sim_thread.is_alive() and data_queue.empty():
+                    is_playing = False
 
-            rocket.position = (ux, uy, uz)
+        state_to_render = simulation_history[playback_index]
 
-            # Map quaternions properly from Z-up to Y-up
-            i, j, k, w = latest_state['ori']
-            # nalgebra / rust produces q = w + xi + yj + zk
-            # ursina uses generic quaternion representations.
-            # Depending on coordinate handedness, we assign the rotation
-            rocket.quaternion = Quat(w, i, j, k)
+        if 'target' in state_to_render and state_to_render['target'] is not None:
+            tx, ty, tz = state_to_render['target']
+            target_waypoint.position = (tx, tz, ty)
 
-            vel = latest_state['vel']
+        # Minecraft style mouse look
+        if mouse.locked:
+            camera_controller.rotation_y += mouse.velocity[0] * 40
+            camera.rotation_x -= mouse.velocity[1] * 40
+            camera.rotation_x = clamp(camera.rotation_x, -90, 90)
 
-            # Record visual trail
+        # Basic WASD movement that doesn't require holding right-click
+        move_speed = 100 * time.dt
+        if held_keys['shift']:
+            move_speed *= 3
+
+        if held_keys['w']:
+            camera_controller.position += camera.forward * move_speed
+        if held_keys['s']:
+            camera_controller.position -= camera.forward * move_speed
+        if held_keys['d']:
+            camera_controller.position += camera.right * move_speed
+        if held_keys['a']:
+            camera_controller.position -= camera.right * move_speed
+        if held_keys['space'] or held_keys['e']:
+            camera_controller.position += camera.up * move_speed
+        if held_keys['control'] or held_keys['q']:
+            camera_controller.position -= camera.up * move_speed
+
+        pos = state_to_render['pos']
+        ux, uy, uz = pos[0], pos[2], pos[1]
+        rocket.position = (ux, uy, uz)
+
+        i, j, k, w = state_to_render['ori']
+        rocket.quaternion = Quat(w, i, j, k)
+
+        vel = state_to_render['vel']
+
+        # Rebuild trail based on history up to current playback frame to allow scrubbing
+        # We sample every 5th frame for the trail to avoid thousands of vertices if we rewind a lot
+        if not is_playing:
+            # If scrubbing, reconstruct the entire trail cheaply
+            trail_pts = []
+            for idx in range(0, playback_index + 1, 5):
+                p = simulation_history[idx]['pos']
+                trail_pts.append(Vec3(p[0], p[2], p[1]))
+            # add the very last point
+            trail_pts.append(rocket.position)
+            trail.model.vertices = trail_pts
+            trail.model.generate()
+        else:
+            # If playing forward normally, just append
             if len(trail_points) == 0 or distance(rocket.position, trail_points[-1]) > 5.0:
                 trail_points.append(rocket.position)
                 if len(trail_points) > 1:
                     trail.model.vertices = trail_points
                     trail.model.generate()
 
-            info_text.text = (
-                f"Conserva Telemetry Live\n"
-                f"ALT: {uy:.1f} m\n"
-                f"SPD: {(vel[0]**2 + vel[1]**2 + vel[2]**2)**0.5:.1f} m/s\n"
-                f"X: {pos[0]:.1f} Y: {pos[1]:.1f} Z: {pos[2]:.1f}"
-            )
+        status = "Live" if (is_playing and playback_index ==
+                            len(simulation_history) - 1) else "REPLAY"
+        status = "PAUSED" if not is_playing else status
 
-        # --- RUN EVERY RENDER FRAME (60Hz+) ---
-        # Auto-framing camera heavily weighted towards the rocket to keep it close
-        center_x = rocket.x * 0.8 + target_waypoint.x * 0.2
-        center_y = rocket.y * 0.8 + target_waypoint.y * 0.2
-        center_z = rocket.z * 0.8 + target_waypoint.z * 0.2
-
-        # Calculate absolute distance between the two bodies
-        dist = distance(rocket.position, target_waypoint.position)
-
-        # Significantly reduced padding to make the camera much closer to the missile
-        padding = max(dist * 0.4, 80.0)
-
-        desired_pos = Vec3(center_x, center_y + padding * 0.5,
-                           center_z - padding)
-
-        camera.position = lerp(camera.position, desired_pos, time.dt * 5.0)
-
-        # Look straight at the rocket itself rather than the empty midpoint
-        camera.look_at(rocket.position)
+        info_text.text = (
+            f"Conserva Telemetry [{status}]\n"
+            f"Frame: {playback_index}/{len(simulation_history) - 1}\n"
+            f"ALT: {uy:.1f} m\n"
+            f"SPD: {(vel[0]**2 + vel[1]**2 + vel[2]**2)**0.5:.1f} m/s\n"
+            f"X: {pos[0]:.1f} Y: {pos[1]:.1f} Z: {pos[2]:.1f}\n"
+            f"Controls: [Space] Pause/Play  [R] Restart\n"
+            f"[Left/Right] Step Scrub  [F] Focus Rocket\n"
+            f"[WASD / Space / Ctrl] Fly  [Mouse] Look\n"
+            f"[Tab] Toggle Mouse Lock"
+        )
 
     app.run()
