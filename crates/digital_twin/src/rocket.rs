@@ -5,6 +5,7 @@ use uom::si::angular_velocity::radian_per_second;
 use uom::si::f64::{Angle, Length, Time};
 use uom::si::length::meter;
 use uom::si::time::second;
+use uom::si::velocity::meter_per_second;
 
 #[derive(Debug, Clone)]
 pub struct Pid {
@@ -72,7 +73,7 @@ impl FlightComputer {
     }
 
     /// Core execution loop of the flight computer.
-    /// Runs continuously every time step `dt` to process sensors, update targeting, 
+    /// Runs continuously every time step `dt` to process sensors, update targeting,
     /// generate PID control commands, and move the actuating servos.
     pub fn tick(&mut self, state: &MissileState, dt: f64) -> MissileState {
         let mut new_state = state.clone();
@@ -106,9 +107,9 @@ impl FlightComputer {
         new_state
     }
 
-    /// High-level navigation solver. 
+    /// High-level navigation solver.
     /// If there is an active waypoint, instructs the system how fast it needs
-    /// to rotate (pitch & yaw) to point its nose at the target. 
+    /// to rotate (pitch & yaw) to point its nose at the target.
     fn compute_target_rates(&self, state: &MissileState) -> (f64, f64) {
         if let Some(waypoint) = self.target_waypoint {
             if let Some(los_body) = self.calculate_los_body(state, &waypoint) {
@@ -118,7 +119,7 @@ impl FlightComputer {
         (0.0, 0.0)
     }
 
-    /// Converts a world-space waypoint target into a Line of Sight (LOS) vector 
+    /// Converts a world-space waypoint target into a Line of Sight (LOS) vector
     /// mapping the target directly into the rocket's local body coordinate space.
     fn calculate_los_body(
         &self,
@@ -131,14 +132,26 @@ impl FlightComputer {
 
         let dist = (dx_m.powi(2) + dy_m.powi(2) + dz_m.powi(2)).sqrt();
         if dist > 0.1 {
-            let los_world = Vector3::new(dx_m / dist, dy_m / dist, dz_m / dist);
-            Some(state.orientation.inverse() * los_world)
+            let target_world = Vector3::new(dx_m / dist, dy_m / dist, dz_m / dist);
+            let mut target_body = state.orientation.inverse() * target_world;
+
+            // To work in wind, we steer the velocity vector rather than just pointing the nose.
+            // We measure our travel drift in body frame and command the nose proportionally in the opposite direction.
+            let vel = state.body_velocity.map(|v| v.get::<meter_per_second>());
+            let v_mag = vel.norm();
+            if v_mag > 10.0 {
+                let travel_dir = vel / v_mag;
+                let drift = target_body - travel_dir;
+                target_body = (target_body + drift).normalize();
+            }
+
+            Some(target_body)
         } else {
             None
         }
     }
 
-    /// Analyzes the body-relative Line of Sight (LOS) vector and outputs 
+    /// Analyzes the body-relative Line of Sight (LOS) vector and outputs
     /// the target pitch and yaw rates required to rotate toward it via cross product.
     fn compute_rates_from_los(&self, los_body: &Vector3<f64>) -> (f64, f64) {
         // Assuming +Z is the forward axis of the rocket nose
@@ -213,7 +226,7 @@ impl FlightComputer {
         (lagged_pitch, lagged_yaw)
     }
 
-    /// Rate limiter ensuring the angular velocity of the moving parts never exceeds their 
+    /// Rate limiter ensuring the angular velocity of the moving parts never exceeds their
     /// physical rating (e.g., servo can only move 60 degrees per second).
     fn apply_slew_rate_limits(
         &self,
