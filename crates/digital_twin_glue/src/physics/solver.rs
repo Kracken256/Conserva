@@ -183,6 +183,24 @@ impl AeroSolver {
     }
 }
 
+/// Computes a fast approximation of x^(-0.2) which is used for the
+/// 1/5th power law of turbulent boundary layer skin friction.
+/// Uses the magic bit-level constant for an inverse 5th root,
+/// followed by one Newton-Raphson iteration.
+#[inline(always)]
+fn fast_inv_fifth_root(x: f32) -> f32 {
+    let i = x.to_bits();
+    // Magic constant for inverse 5th root: 0x4C32DDF8
+    let j = 0x4C32DDF8 - i / 5;
+    let y = f32::from_bits(j);
+
+    // One iteration of Newton-Raphson: y = y * (1.2 - 0.2 * x * y^5)
+    let y2 = y * y;
+    let y4 = y2 * y2;
+    let y5 = y4 * y;
+    y * (1.2 - 0.2 * x * y5)
+}
+
 use wide::{CmpGe, CmpGt, CmpLt, f64x8};
 
 impl AeroSolver {
@@ -302,22 +320,34 @@ impl AeroSolver {
             }
 
             let cx = f64x8::new([
-                mesh.faces.centroid_x[offset], mesh.faces.centroid_x[offset+1],
-                mesh.faces.centroid_x[offset+2], mesh.faces.centroid_x[offset+3],
-                mesh.faces.centroid_x[offset+4], mesh.faces.centroid_x[offset+5],
-                mesh.faces.centroid_x[offset+6], mesh.faces.centroid_x[offset+7]
+                mesh.faces.centroid_x[offset],
+                mesh.faces.centroid_x[offset + 1],
+                mesh.faces.centroid_x[offset + 2],
+                mesh.faces.centroid_x[offset + 3],
+                mesh.faces.centroid_x[offset + 4],
+                mesh.faces.centroid_x[offset + 5],
+                mesh.faces.centroid_x[offset + 6],
+                mesh.faces.centroid_x[offset + 7],
             ]);
             let cy = f64x8::new([
-                mesh.faces.centroid_y[offset], mesh.faces.centroid_y[offset+1],
-                mesh.faces.centroid_y[offset+2], mesh.faces.centroid_y[offset+3],
-                mesh.faces.centroid_y[offset+4], mesh.faces.centroid_y[offset+5],
-                mesh.faces.centroid_y[offset+6], mesh.faces.centroid_y[offset+7]
+                mesh.faces.centroid_y[offset],
+                mesh.faces.centroid_y[offset + 1],
+                mesh.faces.centroid_y[offset + 2],
+                mesh.faces.centroid_y[offset + 3],
+                mesh.faces.centroid_y[offset + 4],
+                mesh.faces.centroid_y[offset + 5],
+                mesh.faces.centroid_y[offset + 6],
+                mesh.faces.centroid_y[offset + 7],
             ]);
             let cz = f64x8::new([
-                mesh.faces.centroid_z[offset], mesh.faces.centroid_z[offset+1],
-                mesh.faces.centroid_z[offset+2], mesh.faces.centroid_z[offset+3],
-                mesh.faces.centroid_z[offset+4], mesh.faces.centroid_z[offset+5],
-                mesh.faces.centroid_z[offset+6], mesh.faces.centroid_z[offset+7]
+                mesh.faces.centroid_z[offset],
+                mesh.faces.centroid_z[offset + 1],
+                mesh.faces.centroid_z[offset + 2],
+                mesh.faces.centroid_z[offset + 3],
+                mesh.faces.centroid_z[offset + 4],
+                mesh.faces.centroid_z[offset + 5],
+                mesh.faces.centroid_z[offset + 6],
+                mesh.faces.centroid_z[offset + 7],
             ]);
 
             let rx = cx - cm_x;
@@ -347,22 +377,34 @@ impl AeroSolver {
             let v_dir_z = (f64x8::splat(0.0) - v_local_z) / safe_v_mag;
 
             let nx = f64x8::new([
-                mesh.faces.normal_x[offset], mesh.faces.normal_x[offset+1],
-                mesh.faces.normal_x[offset+2], mesh.faces.normal_x[offset+3],
-                mesh.faces.normal_x[offset+4], mesh.faces.normal_x[offset+5],
-                mesh.faces.normal_x[offset+6], mesh.faces.normal_x[offset+7]
+                mesh.faces.normal_x[offset],
+                mesh.faces.normal_x[offset + 1],
+                mesh.faces.normal_x[offset + 2],
+                mesh.faces.normal_x[offset + 3],
+                mesh.faces.normal_x[offset + 4],
+                mesh.faces.normal_x[offset + 5],
+                mesh.faces.normal_x[offset + 6],
+                mesh.faces.normal_x[offset + 7],
             ]);
             let ny = f64x8::new([
-                mesh.faces.normal_y[offset], mesh.faces.normal_y[offset+1],
-                mesh.faces.normal_y[offset+2], mesh.faces.normal_y[offset+3],
-                mesh.faces.normal_y[offset+4], mesh.faces.normal_y[offset+5],
-                mesh.faces.normal_y[offset+6], mesh.faces.normal_y[offset+7]
+                mesh.faces.normal_y[offset],
+                mesh.faces.normal_y[offset + 1],
+                mesh.faces.normal_y[offset + 2],
+                mesh.faces.normal_y[offset + 3],
+                mesh.faces.normal_y[offset + 4],
+                mesh.faces.normal_y[offset + 5],
+                mesh.faces.normal_y[offset + 6],
+                mesh.faces.normal_y[offset + 7],
             ]);
             let nz = f64x8::new([
-                mesh.faces.normal_z[offset], mesh.faces.normal_z[offset+1],
-                mesh.faces.normal_z[offset+2], mesh.faces.normal_z[offset+3],
-                mesh.faces.normal_z[offset+4], mesh.faces.normal_z[offset+5],
-                mesh.faces.normal_z[offset+6], mesh.faces.normal_z[offset+7]
+                mesh.faces.normal_z[offset],
+                mesh.faces.normal_z[offset + 1],
+                mesh.faces.normal_z[offset + 2],
+                mesh.faces.normal_z[offset + 3],
+                mesh.faces.normal_z[offset + 4],
+                mesh.faces.normal_z[offset + 5],
+                mesh.faces.normal_z[offset + 6],
+                mesh.faces.normal_z[offset + 7],
             ]);
 
             let cos_theta = (nx * v_dir_x) + (ny * v_dir_y) + (nz * v_dir_z);
@@ -383,10 +425,14 @@ impl AeroSolver {
             // x^-0.2 is mathematically equivalent to 1.0 / x^0.2.
             let safe_rey_arr = safe_reynolds.to_array();
             let cp_turb_arr = [
-                0.074 / safe_rey_arr[0].powf(0.2), 0.074 / safe_rey_arr[1].powf(0.2),
-                0.074 / safe_rey_arr[2].powf(0.2), 0.074 / safe_rey_arr[3].powf(0.2),
-                0.074 / safe_rey_arr[4].powf(0.2), 0.074 / safe_rey_arr[5].powf(0.2),
-                0.074 / safe_rey_arr[6].powf(0.2), 0.074 / safe_rey_arr[7].powf(0.2)
+                0.074 * fast_inv_fifth_root(safe_rey_arr[0] as f32) as f64,
+                0.074 * fast_inv_fifth_root(safe_rey_arr[1] as f32) as f64,
+                0.074 * fast_inv_fifth_root(safe_rey_arr[2] as f32) as f64,
+                0.074 * fast_inv_fifth_root(safe_rey_arr[3] as f32) as f64,
+                0.074 * fast_inv_fifth_root(safe_rey_arr[4] as f32) as f64,
+                0.074 * fast_inv_fifth_root(safe_rey_arr[5] as f32) as f64,
+                0.074 * fast_inv_fifth_root(safe_rey_arr[6] as f32) as f64,
+                0.074 * fast_inv_fifth_root(safe_rey_arr[7] as f32) as f64,
             ];
             let cp_turb = f64x8::new(cp_turb_arr);
 
@@ -442,13 +488,55 @@ impl AeroSolver {
         let t_arr_y = torque_y.to_array();
         let t_arr_z = torque_z.to_array();
 
-        total_force.x += f_arr_x[0] + f_arr_x[1] + f_arr_x[2] + f_arr_x[3] + f_arr_x[4] + f_arr_x[5] + f_arr_x[6] + f_arr_x[7];
-        total_force.y += f_arr_y[0] + f_arr_y[1] + f_arr_y[2] + f_arr_y[3] + f_arr_y[4] + f_arr_y[5] + f_arr_y[6] + f_arr_y[7];
-        total_force.z += f_arr_z[0] + f_arr_z[1] + f_arr_z[2] + f_arr_z[3] + f_arr_z[4] + f_arr_z[5] + f_arr_z[6] + f_arr_z[7];
+        total_force.x += f_arr_x[0]
+            + f_arr_x[1]
+            + f_arr_x[2]
+            + f_arr_x[3]
+            + f_arr_x[4]
+            + f_arr_x[5]
+            + f_arr_x[6]
+            + f_arr_x[7];
+        total_force.y += f_arr_y[0]
+            + f_arr_y[1]
+            + f_arr_y[2]
+            + f_arr_y[3]
+            + f_arr_y[4]
+            + f_arr_y[5]
+            + f_arr_y[6]
+            + f_arr_y[7];
+        total_force.z += f_arr_z[0]
+            + f_arr_z[1]
+            + f_arr_z[2]
+            + f_arr_z[3]
+            + f_arr_z[4]
+            + f_arr_z[5]
+            + f_arr_z[6]
+            + f_arr_z[7];
 
-        total_torque.x += t_arr_x[0] + t_arr_x[1] + t_arr_x[2] + t_arr_x[3] + t_arr_x[4] + t_arr_x[5] + t_arr_x[6] + t_arr_x[7];
-        total_torque.y += t_arr_y[0] + t_arr_y[1] + t_arr_y[2] + t_arr_y[3] + t_arr_y[4] + t_arr_y[5] + t_arr_y[6] + t_arr_y[7];
-        total_torque.z += t_arr_z[0] + t_arr_z[1] + t_arr_z[2] + t_arr_z[3] + t_arr_z[4] + t_arr_z[5] + t_arr_z[6] + t_arr_z[7];
+        total_torque.x += t_arr_x[0]
+            + t_arr_x[1]
+            + t_arr_x[2]
+            + t_arr_x[3]
+            + t_arr_x[4]
+            + t_arr_x[5]
+            + t_arr_x[6]
+            + t_arr_x[7];
+        total_torque.y += t_arr_y[0]
+            + t_arr_y[1]
+            + t_arr_y[2]
+            + t_arr_y[3]
+            + t_arr_y[4]
+            + t_arr_y[5]
+            + t_arr_y[6]
+            + t_arr_y[7];
+        total_torque.z += t_arr_z[0]
+            + t_arr_z[1]
+            + t_arr_z[2]
+            + t_arr_z[3]
+            + t_arr_z[4]
+            + t_arr_z[5]
+            + t_arr_z[6]
+            + t_arr_z[7];
 
         // Do the scalar loop for the remainder elements
         let rem_start = n_faces - remainder;
@@ -486,7 +574,7 @@ impl AeroSolver {
 
             let rey = (air_density * vm * length_ref) / dyn_viscosity;
             let cf = if rey > 1e5 {
-                0.074 / rey.powf(0.2)
+                (0.074 * fast_inv_fifth_root(rey as f32)) as f64
             } else {
                 0.002
             };
@@ -690,17 +778,27 @@ mod tests {
         let c = Vector3::zeros();
 
         // 8 faces (uses exactly 1 SIMD chunk)
-        let mesh8 = create_faces(&[n, n, n, n, n, n, n, n], &[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], &[c, c, c, c, c, c, c, c]);
+        let mesh8 = create_faces(
+            &[n, n, n, n, n, n, n, n],
+            &[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            &[c, c, c, c, c, c, c, c],
+        );
         let out8 = solver.calculate_forces(&mesh8, &state, 1.225, sos, 1.8e-5);
 
         // 7 faces (uses exactly 7 scalar remainder, 0 SIMD)
-        let mesh7 = create_faces(&[n, n, n, n, n, n, n], &[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], &[c, c, c, c, c, c, c]);
+        let mesh7 = create_faces(
+            &[n, n, n, n, n, n, n],
+            &[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            &[c, c, c, c, c, c, c],
+        );
         let out7 = solver.calculate_forces(&mesh7, &state, 1.225, sos, 1.8e-5);
 
         // 15 faces (1 SIMD chunk + 7 scalar remainder)
         let mesh15 = create_faces(
             &[n, n, n, n, n, n, n, n, n, n, n, n, n, n, n],
-            &[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            &[
+                1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+            ],
             &[c, c, c, c, c, c, c, c, c, c, c, c, c, c, c],
         );
         let out15 = solver.calculate_forces(&mesh15, &state, 1.225, sos, 1.8e-5);
@@ -749,5 +847,26 @@ mod tests {
             Vector3::zeros(),
             1e-4,
         );
+    }
+
+    #[test]
+    fn test_fast_inv_fifth_root() {
+        // Range of typical Reynolds numbers for turbulent flow
+        let test_vals: [f32; 6] = [1e4, 1e5, 1e6, 1e7, 1e8, 1e9];
+        for &val in &test_vals {
+            let exact = val.powf(-0.2);
+            let approx = fast_inv_fifth_root(val);
+
+            let rel_error = ((approx - exact) / exact).abs();
+
+            // Verify that our fast approximation introduces less than 5% relative error
+            assert!(
+                rel_error < 0.05,
+                "Approximation error too high for val: {}. Exact: {}, Approx: {}",
+                val,
+                exact,
+                approx
+            );
+        }
     }
 }
