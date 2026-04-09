@@ -1,2 +1,4 @@
 /target
 .venv
+rocket.obj
+models_compressed/rocket.bam
