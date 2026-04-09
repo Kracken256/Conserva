@@ -43,7 +43,12 @@ fn print_state(state: &MissileState) {
         state.tvc_angles[0].get::<radian>(),
         state.tvc_angles[1].get::<radian>()
     );
-    println!("Mass: {:.04} kg", state.mass.get::<kilogram>());
+    println!(
+        "Total Wet Mass: {:.04} kg | Propellant: {:.04} kg | Dry Mass: {:.04} kg",
+        state.total_mass().get::<kilogram>(),
+        state.propellant_mass.get::<kilogram>(),
+        state.dry_mass.get::<kilogram>()
+    );
     println!(
         "Inertia Tensor: [[{:.04}, {:.04}, {:.04}], [{:.04}, {:.04}, {:.04}], [{:.04}, {:.04}, {:.04}]] kg*m^2",
         state.inertia_tensor[(0, 0)],
@@ -83,9 +88,36 @@ fn main() {
         last_frame_time = now;
 
         // 2. Step the physics engine by that exact amount
-        // We check dt > 0 to avoid potential panics or zero-division in the solver
-        if dt > 0.0 {
-            twin.step(dt);
+        // We limit dt to max 0.01s (10ms) per step to prevent RK4 numerical explosion from large angular rates
+        // If the frame takes longer due to CPU load, the simulation will just slow down instead of accumulating NaNs.
+        let sim_dt = dt.min(0.01);
+        if sim_dt > 0.0 {
+            twin.step(sim_dt);
+        }
+
+        // Check if we reached the target waypoint
+        if let Some(wp) = waypoint {
+            let dx = wp[0].get::<meter>() - twin.state.position[0].get::<meter>();
+            let dy = wp[1].get::<meter>() - twin.state.position[1].get::<meter>();
+            let dz = wp[2].get::<meter>() - twin.state.position[2].get::<meter>();
+            let distance = (dx * dx + dy * dy + dz * dz).sqrt();
+
+            // Break the simulation loop if we are within a reasonable proximity radius (e.g., 20 meters)
+            if distance < 30.0 {
+                println!(
+                    "\n[SIMULATION STOPPED] Target hit! Final distance: {:.2} meters",
+                    distance
+                );
+                print_state(&twin.state);
+                break;
+            }
+        }
+
+        // Failsafe: stop if we hit the ground
+        if twin.state.position[2].get::<meter>() <= 0.0 {
+            println!("\n[SIMULATION STOPPED] Ground impact!");
+            print_state(&twin.state);
+            break;
         }
 
         // 3. Print the state only once per second

@@ -58,8 +58,10 @@ impl Rk4 {
             &Vector3<f64>,
         ) -> (Vector3<f64>, Vector3<f64>),
     {
-        let mass = state.mass.value;
-        let inertia = state.inertia_tensor;
+        let mass = state.total_mass().value;
+        // Approximation: scale the identity inertia tensor by the total mass
+        // For a more accurate reading, you would want to calculate the actual moment of inertia for an elongating cylinder payload vs mass distribution over time.
+        let inertia = state.inertia_tensor * mass;
         let inertia_inv = inertia.try_inverse().unwrap_or_else(Matrix3::identity);
 
         let p = state.position.map(|c| c.value);

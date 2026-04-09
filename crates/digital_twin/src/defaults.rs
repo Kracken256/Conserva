@@ -14,7 +14,7 @@ pub fn get_initial_state() -> MissileState {
         position: [
             Length::new::<meter>(0.0),
             Length::new::<meter>(0.0),
-            Length::new::<meter>(10000.0),
+            Length::new::<meter>(500.0),
         ]
         .into(),
         body_velocity: [
@@ -32,9 +32,10 @@ pub fn get_initial_state() -> MissileState {
         .into(),
         fin_angles: [Angle::new::<radian>(0.0); 4],
         tvc_angles: [Angle::new::<radian>(0.0); 2],
-        mass: Mass::new::<kilogram>(100.0),
-        // For a 3m diameter (1.5m radius) sphere at 100kg, I = 2/5 * m * R^2 = 0.4 * 100 * 2.25 = 90.0
-        inertia_tensor: Matrix3::new(90.0, 0.0, 0.0, 0.0, 90.0, 0.0, 0.0, 0.0, 90.0),
+        dry_mass: Mass::new::<kilogram>(40.0),
+        propellant_mass: Mass::new::<kilogram>(100.0),
+        motor_thrust: Force::new::<newton>(0.0),
+        inertia_tensor: Matrix3::identity(),
     }
 }
 
@@ -46,7 +47,9 @@ pub fn get_default_config() -> MissileConfig {
         fin_chord_length: Length::new::<meter>(0.05),
         motor_impulse_curve: vec![
             (Time::new::<second>(0.0), Force::new::<newton>(0.0)),
-            (Time::new::<second>(1.0), Force::new::<newton>(1.0)),
+            (Time::new::<second>(0.1), Force::new::<newton>(17800.0)),
+            (Time::new::<second>(20.2), Force::new::<newton>(17800.0)),
+            (Time::new::<second>(20.4), Force::new::<newton>(0.0)),
         ],
     }
 }

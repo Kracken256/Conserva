@@ -4,9 +4,11 @@ use crate::geometry::config::MissileConfig;
 use crate::geometry::mesh::{Mesh, MeshGenerator};
 use crate::integ;
 use crate::physics::solver::AeroSolver;
-use nalgebra::{Quaternion, UnitQuaternion, Vector3};
+use nalgebra::{Quaternion, Rotation3, UnitQuaternion, Vector3};
+use uom::si::angle::radian;
 use uom::si::angular_velocity::{AngularVelocity, radian_per_second};
 use uom::si::f64::{Length, Velocity};
+use uom::si::force::newton;
 use uom::si::length::meter;
 use uom::si::velocity::meter_per_second;
 
@@ -60,7 +62,24 @@ impl DigitalTwin {
                     .generate(&sub_state, &self.config, &mut self.current_mesh);
 
                 let output = self.solver.calculate_forces(&self.current_mesh, &sub_state);
-                (output.force, output.torque)
+
+                // Add active engine propulsion (Thrust + TVC alignment)
+                let thrust_mag = sub_state.motor_thrust.get::<newton>();
+                let tvc_pitch = sub_state.tvc_angles[0].get::<radian>();
+                let tvc_yaw = sub_state.tvc_angles[1].get::<radian>();
+
+                // Base thrust acts forward down the Z-axis of the vehicle body
+                let thrust_base = Vector3::new(0.0, 0.0, thrust_mag);
+
+                // TVC servos gimbal the nozzle rotating the thrust vector
+                let tvc_rotation = Rotation3::from_euler_angles(tvc_pitch, tvc_yaw, 0.0);
+                let active_thrust = tvc_rotation * thrust_base;
+
+                // Introduce rotational torque from off-axis thrust (assuming nozzle is at rear ~ -1.0m from CG)
+                let nozzle_offset = Vector3::new(0.0, 0.0, -1.0);
+                let motor_torque = nozzle_offset.cross(&active_thrust);
+
+                (output.force + active_thrust, output.torque + motor_torque)
             };
 
         // 3. Let RK4 run the show
