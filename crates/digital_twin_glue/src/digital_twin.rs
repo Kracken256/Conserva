@@ -19,6 +19,7 @@ pub struct DigitalTwin {
     pub solver: AeroSolver,
     pub mesh_generator: Box<dyn MeshGenerator>,
     pub current_mesh: Mesh,
+    pub wind_velocity: Vector3<Velocity>,
     rk4: integ::rk4::Rk4,
 }
 
@@ -36,6 +37,7 @@ impl DigitalTwin {
             mesh_generator,
             rocket,
             current_mesh: Mesh::default(),
+            wind_velocity: Vector3::zeros(),
             rk4: integ::rk4::Rk4 {},
         }
     }
@@ -61,7 +63,16 @@ impl DigitalTwin {
                 self.mesh_generator
                     .generate(&sub_state, &self.config, &mut self.current_mesh);
 
+                // Convert world-frame wind to body-frame and compute relative airspeed
+                let wind_body_f64 = sub_state.orientation.inverse()
+                    * self.wind_velocity.map(|v| v.get::<meter_per_second>());
+                let wind_body_vel = wind_body_f64.map(Velocity::new::<meter_per_second>);
+                sub_state.body_velocity -= wind_body_vel;
+
                 let output = self.solver.calculate_forces(&self.current_mesh, &sub_state);
+
+                // Restore absolute body velocity before continuing (RK4 needs true state velocity, not airspeed)
+                sub_state.body_velocity += wind_body_vel;
 
                 // Add active engine propulsion (Thrust + TVC alignment)
                 let thrust_mag = sub_state.motor_thrust.get::<newton>();
