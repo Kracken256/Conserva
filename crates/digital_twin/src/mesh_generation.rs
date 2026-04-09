@@ -16,14 +16,12 @@ impl MeshGenerator for TheMeshGenerator {
 
         let nose_length = config.geometry.diameter.get::<meter>() * 2.0; // Typical rocket nose
 
-        // Calculate dynamic Center of Gravity (CoG)
-        let dry_m = config.mass.dry_mass.value;
-        let prop_m = state.current_mass.value - dry_m;
-        let cg_z = (0.0 * dry_m + (-body_length / 4.0) * prop_m) / (dry_m + prop_m);
+        // Fetch dynamic Center of Gravity (CoG) from curve
+        let cg = config.geometry.current_cg(state.time);
 
         // Apply CoG shift to all root Z anchors
-        let top_z = body_length / 2.0 - cg_z;
-        let base_z = -body_length / 2.0 - cg_z;
+        let top_z = body_length / 2.0 - cg.z.get::<meter>();
+        let base_z = -body_length / 2.0 - cg.z.get::<meter>();
 
         let sectors = 64; // High fidelity cylinder
         let nose_stacks = 32; // High fidelity ogive nose

@@ -1,5 +1,5 @@
 use digital_twin_glue::prelude::*;
-use nalgebra::{Matrix3, UnitQuaternion};
+use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 use uom::si::angle::radian;
 use uom::si::angular_velocity::radian_per_second;
 use uom::si::f64::{Angle, AngularVelocity, Force, Length, Mass, Time, Velocity};
@@ -59,6 +59,32 @@ pub fn get_default_config() -> MissileConfig {
             diameter: Length::new::<meter>(0.1),
             fin_offset_from_nose: Length::new::<meter>(1.2),
             fin_chord_length: Length::new::<meter>(0.2),
+            cg_curve: vec![
+                (
+                    Time::new::<second>(0.0),
+                    Vector3::new(
+                        Length::new::<meter>(0.0),
+                        Length::new::<meter>(0.0),
+                        Length::new::<meter>(-0.25),
+                    ),
+                ),
+                (
+                    Time::new::<second>(10.4),
+                    Vector3::new(
+                        Length::new::<meter>(0.0),
+                        Length::new::<meter>(0.0),
+                        Length::new::<meter>(0.0),
+                    ),
+                ),
+                (
+                    Time::new::<second>(100.0),
+                    Vector3::new(
+                        Length::new::<meter>(0.0),
+                        Length::new::<meter>(0.0),
+                        Length::new::<meter>(0.0),
+                    ),
+                ),
+            ],
         },
         controller: MissileControllerConfig {
             pitch_pid_kp: 0.365516,
