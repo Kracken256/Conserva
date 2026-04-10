@@ -263,12 +263,12 @@ impl TheMeshGenerator {
         let tip_te_z = tip_le_z - tip_c;
 
         let le_depth = match fin.leading_edge_profile {
-            digital_twin_glue::prelude::FinEdgeProfile::Straight => 0.0,
-            digital_twin_glue::prelude::FinEdgeProfile::Curved { depth } => depth.get::<meter>(),
+            FinEdgeProfile::Straight => 0.0,
+            FinEdgeProfile::Curved { depth } => depth.get::<meter>(),
         };
         let te_depth = match fin.trailing_edge_profile {
-            digital_twin_glue::prelude::FinEdgeProfile::Straight => 0.0,
-            digital_twin_glue::prelude::FinEdgeProfile::Curved { depth } => depth.get::<meter>(),
+            FinEdgeProfile::Straight => 0.0,
+            FinEdgeProfile::Curved { depth } => depth.get::<meter>(),
         };
 
         // We slice the fin span into several stacks to give resolution for the curves.
@@ -303,59 +303,109 @@ impl TheMeshGenerator {
 
                 // 6 points per slice ring to support chamfer
                 // 0: LE tip (sharp)
-                mesh.vertices.push(Vector3::new(r_k * fw_x, r_k * fw_y, le_v));
+                mesh.vertices
+                    .push(Vector3::new(r_k * fw_x, r_k * fw_y, le_v));
                 // 1: LE chamfer left
-                mesh.vertices.push(Vector3::new(r_k * fw_x - side_x * half_t, r_k * fw_y - side_y * half_t, le_v - ch_l));
+                mesh.vertices.push(Vector3::new(
+                    r_k * fw_x - side_x * half_t,
+                    r_k * fw_y - side_y * half_t,
+                    le_v - ch_l,
+                ));
                 // 2: LE chamfer right
-                mesh.vertices.push(Vector3::new(r_k * fw_x + side_x * half_t, r_k * fw_y + side_y * half_t, le_v - ch_l));
-                
+                mesh.vertices.push(Vector3::new(
+                    r_k * fw_x + side_x * half_t,
+                    r_k * fw_y + side_y * half_t,
+                    le_v - ch_l,
+                ));
+
                 // 3: TE chamfer left
-                mesh.vertices.push(Vector3::new(r_k * fw_x - side_x * half_t, r_k * fw_y - side_y * half_t, te_v + ch_l));
+                mesh.vertices.push(Vector3::new(
+                    r_k * fw_x - side_x * half_t,
+                    r_k * fw_y - side_y * half_t,
+                    te_v + ch_l,
+                ));
                 // 4: TE chamfer right
-                mesh.vertices.push(Vector3::new(r_k * fw_x + side_x * half_t, r_k * fw_y + side_y * half_t, te_v + ch_l));
+                mesh.vertices.push(Vector3::new(
+                    r_k * fw_x + side_x * half_t,
+                    r_k * fw_y + side_y * half_t,
+                    te_v + ch_l,
+                ));
                 // 5: TE tip (sharp)
-                mesh.vertices.push(Vector3::new(r_k * fw_x, r_k * fw_y, te_v));
+                mesh.vertices
+                    .push(Vector3::new(r_k * fw_x, r_k * fw_y, te_v));
 
                 if k > 0 {
                     let prev_idx = fin_base_idx + (k - 1) * 6;
                     let curr_idx = fin_base_idx + k * 6;
 
                     // LE left chamfer panel
-                    mesh.indices.push(prev_idx + 0); mesh.indices.push(prev_idx + 1); mesh.indices.push(curr_idx + 1);
-                    mesh.indices.push(prev_idx + 0); mesh.indices.push(curr_idx + 1); mesh.indices.push(curr_idx + 0);
+                    mesh.indices.push(prev_idx + 0);
+                    mesh.indices.push(prev_idx + 1);
+                    mesh.indices.push(curr_idx + 1);
+                    mesh.indices.push(prev_idx + 0);
+                    mesh.indices.push(curr_idx + 1);
+                    mesh.indices.push(curr_idx + 0);
 
                     // LE right chamfer panel
-                    mesh.indices.push(prev_idx + 2); mesh.indices.push(prev_idx + 0); mesh.indices.push(curr_idx + 0);
-                    mesh.indices.push(prev_idx + 2); mesh.indices.push(curr_idx + 0); mesh.indices.push(curr_idx + 2);
+                    mesh.indices.push(prev_idx + 2);
+                    mesh.indices.push(prev_idx + 0);
+                    mesh.indices.push(curr_idx + 0);
+                    mesh.indices.push(prev_idx + 2);
+                    mesh.indices.push(curr_idx + 0);
+                    mesh.indices.push(curr_idx + 2);
 
                     // Left mid panel
-                    mesh.indices.push(prev_idx + 1); mesh.indices.push(prev_idx + 3); mesh.indices.push(curr_idx + 3);
-                    mesh.indices.push(prev_idx + 1); mesh.indices.push(curr_idx + 3); mesh.indices.push(curr_idx + 1);
+                    mesh.indices.push(prev_idx + 1);
+                    mesh.indices.push(prev_idx + 3);
+                    mesh.indices.push(curr_idx + 3);
+                    mesh.indices.push(prev_idx + 1);
+                    mesh.indices.push(curr_idx + 3);
+                    mesh.indices.push(curr_idx + 1);
 
                     // Right mid panel
-                    mesh.indices.push(prev_idx + 4); mesh.indices.push(prev_idx + 2); mesh.indices.push(curr_idx + 2);
-                    mesh.indices.push(prev_idx + 4); mesh.indices.push(curr_idx + 2); mesh.indices.push(curr_idx + 4);
+                    mesh.indices.push(prev_idx + 4);
+                    mesh.indices.push(prev_idx + 2);
+                    mesh.indices.push(curr_idx + 2);
+                    mesh.indices.push(prev_idx + 4);
+                    mesh.indices.push(curr_idx + 2);
+                    mesh.indices.push(curr_idx + 4);
 
                     // TE left chamfer panel
-                    mesh.indices.push(prev_idx + 3); mesh.indices.push(prev_idx + 5); mesh.indices.push(curr_idx + 5);
-                    mesh.indices.push(prev_idx + 3); mesh.indices.push(curr_idx + 5); mesh.indices.push(curr_idx + 3);
+                    mesh.indices.push(prev_idx + 3);
+                    mesh.indices.push(prev_idx + 5);
+                    mesh.indices.push(curr_idx + 5);
+                    mesh.indices.push(prev_idx + 3);
+                    mesh.indices.push(curr_idx + 5);
+                    mesh.indices.push(curr_idx + 3);
 
                     // TE right chamfer panel
-                    mesh.indices.push(prev_idx + 5); mesh.indices.push(prev_idx + 4); mesh.indices.push(curr_idx + 4);
-                    mesh.indices.push(prev_idx + 5); mesh.indices.push(curr_idx + 4); mesh.indices.push(curr_idx + 5);
+                    mesh.indices.push(prev_idx + 5);
+                    mesh.indices.push(prev_idx + 4);
+                    mesh.indices.push(curr_idx + 4);
+                    mesh.indices.push(prev_idx + 5);
+                    mesh.indices.push(curr_idx + 4);
+                    mesh.indices.push(curr_idx + 5);
                 }
             }
 
             // Cap the Top (Tip of the fin)
             let tip_idx = fin_base_idx + fin_stacks * 6;
-            
+
             // Top LE wedge cap
-            mesh.indices.push(tip_idx + 0); mesh.indices.push(tip_idx + 1); mesh.indices.push(tip_idx + 2);
+            mesh.indices.push(tip_idx + 0);
+            mesh.indices.push(tip_idx + 1);
+            mesh.indices.push(tip_idx + 2);
             // Top mid quad cap
-            mesh.indices.push(tip_idx + 1); mesh.indices.push(tip_idx + 3); mesh.indices.push(tip_idx + 4);
-            mesh.indices.push(tip_idx + 1); mesh.indices.push(tip_idx + 4); mesh.indices.push(tip_idx + 2);
+            mesh.indices.push(tip_idx + 1);
+            mesh.indices.push(tip_idx + 3);
+            mesh.indices.push(tip_idx + 4);
+            mesh.indices.push(tip_idx + 1);
+            mesh.indices.push(tip_idx + 4);
+            mesh.indices.push(tip_idx + 2);
             // Top TE wedge cap
-            mesh.indices.push(tip_idx + 3); mesh.indices.push(tip_idx + 5); mesh.indices.push(tip_idx + 4);
+            mesh.indices.push(tip_idx + 3);
+            mesh.indices.push(tip_idx + 5);
+            mesh.indices.push(tip_idx + 4);
         }
     }
 }
@@ -516,6 +566,196 @@ mod tests {
         assert!(
             (min_y - (-expected_bound)).abs() < 1e-2,
             "Y bound min mismatch"
+        );
+    }
+
+    #[test]
+    fn mesh_indices_form_complete_triangles() {
+        let config = get_default_config();
+        let state = get_initial_state(&config);
+        let mut mesh = Mesh::default();
+        let generator = TheMeshGenerator::default();
+
+        generator.generate(&state, &config, &mut mesh);
+
+        assert_eq!(
+            mesh.indices.len() % 3,
+            0,
+            "Indices count {} is not a multiple of 3 (not a valid triangle set)",
+            mesh.indices.len()
+        );
+    }
+
+    #[test]
+    fn mesh_contains_no_degenerate_or_infinite_vertices() {
+        let config = get_default_config();
+        let state = get_initial_state(&config);
+        let mut mesh = Mesh::default();
+        let generator = TheMeshGenerator::default();
+
+        generator.generate(&state, &config, &mut mesh);
+
+        for (i, v) in mesh.vertices.iter().enumerate() {
+            assert!(
+                v.x.is_finite() && v.y.is_finite() && v.z.is_finite(),
+                "Vertex {} is infinite or NaN: {:?}",
+                i,
+                v
+            );
+        }
+    }
+
+    #[test]
+    fn center_of_gravity_shift_moves_entire_mesh_purely_in_z() {
+        use uom::si::f64::{Length, Time};
+        use uom::si::length::meter;
+        use uom::si::time::second;
+
+        let mut config_cg_zero = get_default_config();
+
+        // Modify cg curve to strictly returning 0.0 at all times
+        config_cg_zero.geometry.cg_curve = vec![(
+            Time::new::<second>(0.0),
+            Vector3::new(
+                Length::new::<meter>(0.0),
+                Length::new::<meter>(0.0),
+                Length::new::<meter>(0.0),
+            ),
+        )];
+
+        let state = get_initial_state(&config_cg_zero);
+        let mut mesh_cg_zero = Mesh::default();
+        let generator = TheMeshGenerator::default();
+        generator.generate(&state, &config_cg_zero, &mut mesh_cg_zero);
+
+        let mut config_cg_shifted = config_cg_zero.clone();
+        config_cg_shifted.geometry.cg_curve = vec![(
+            Time::new::<second>(0.0),
+            Vector3::new(
+                Length::new::<meter>(0.0),
+                Length::new::<meter>(0.0),
+                Length::new::<meter>(1.0),
+            ),
+        )];
+
+        let mut mesh_cg_shifted = Mesh::default();
+        generator.generate(&state, &config_cg_shifted, &mut mesh_cg_shifted);
+
+        assert_eq!(mesh_cg_zero.vertices.len(), mesh_cg_shifted.vertices.len());
+
+        for (v0, v1) in mesh_cg_zero
+            .vertices
+            .iter()
+            .zip(mesh_cg_shifted.vertices.iter())
+        {
+            assert_eq!(v0.x, v1.x);
+            assert_eq!(v0.y, v1.y);
+            // v1 should be strictly translated backwards by exactly 1.0m
+            assert!((v1.z - (v0.z - 1.0)).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn mesh_generates_correct_number_of_fins() {
+        let mut config = get_default_config();
+        // Base vertex count without fins is the cylinder/nose components
+        config.geometry.fin_set.num_fins = 0;
+        let state = get_initial_state(&config);
+        let mut mesh_zero = Mesh::default();
+        let generator = TheMeshGenerator::default();
+        generator.generate(&state, &config, &mut mesh_zero);
+
+        let count_zero = mesh_zero.vertices.len();
+
+        config.geometry.fin_set.num_fins = 4;
+        let mut mesh_four = Mesh::default();
+        generator.generate(&state, &config, &mut mesh_four);
+        let count_four = mesh_four.vertices.len();
+
+        assert!(count_four > count_zero, "Expected more vertices for 4 fins");
+
+        let fins_vertices = count_four - count_zero;
+
+        config.geometry.fin_set.num_fins = 8;
+        let mut mesh_eight = Mesh::default();
+        generator.generate(&state, &config, &mut mesh_eight);
+        let count_eight = mesh_eight.vertices.len();
+
+        let fins_vertices_8 = count_eight - count_zero;
+        assert_eq!(
+            fins_vertices * 2,
+            fins_vertices_8,
+            "8 fins should generate twice as many fin vertices as 4 fins"
+        );
+    }
+
+    #[test]
+    fn blunted_nosecone_generates_larger_tip_radius() {
+        let mut config_sharp = get_default_config();
+        use uom::si::f64::Length;
+        use uom::si::length::meter;
+        config_sharp.geometry.nosecone_shape = NoseconeShape::Conical {
+            length: Length::new::<meter>(1.0),
+            blunting_radius: None,
+        };
+
+        let mut config_blunt = config_sharp.clone();
+        config_blunt.geometry.nosecone_shape = NoseconeShape::Conical {
+            length: Length::new::<meter>(1.0),
+            blunting_radius: Some(Length::new::<meter>(0.1)),
+        };
+
+        let radius_sharp =
+            TheMeshGenerator::apply_blunting(&config_sharp.geometry.nosecone_shape, 0.001, 0.05);
+        let radius_blunt =
+            TheMeshGenerator::apply_blunting(&config_blunt.geometry.nosecone_shape, 0.001, 0.05);
+
+        // Blunted profile effectively rounds off the sharp conical tip
+        assert!(radius_blunt > radius_sharp);
+    }
+
+    #[test]
+    fn different_nosecone_shapes_yield_unique_profiles() {
+        use uom::si::f64::Length;
+        use uom::si::length::meter;
+        let base_radius = 0.1;
+        let length = 1.0;
+        let t = 0.5; // Midway up the nose
+        let x = 0.5; // 0.5 meters down
+
+        let conical = NoseconeShape::Conical {
+            length: Length::new::<meter>(length),
+            blunting_radius: None,
+        };
+        let r_conical =
+            TheMeshGenerator::calculate_profile_radius(&conical, base_radius, length, x, t);
+
+        let elliptic = NoseconeShape::Elliptical {
+            length: Length::new::<meter>(length),
+        };
+        let r_elliptic =
+            TheMeshGenerator::calculate_profile_radius(&elliptic, base_radius, length, x, t);
+
+        let power = NoseconeShape::PowerSeries {
+            length: Length::new::<meter>(length),
+            blunting_radius: None,
+            n: 0.75,
+        };
+        let r_power = TheMeshGenerator::calculate_profile_radius(&power, base_radius, length, x, t);
+
+        assert!(
+            (r_conical - 0.05).abs() < 1e-6,
+            "Conical at t=0.5 should be half base radius"
+        );
+
+        // Elliptical should be wider/fatter in the middle than a straight conical line
+        assert!(r_elliptic > r_conical);
+
+        // Power series with n=0.75 is 0.5^0.75 * 0.1 = 0.0594, wider than cone but probably narrower than ellipse
+        assert!(r_power > r_conical);
+        assert!(
+            (r_elliptic - r_power).abs() > 1e-3,
+            "Shapes should produce unique radiuses"
         );
     }
 }
