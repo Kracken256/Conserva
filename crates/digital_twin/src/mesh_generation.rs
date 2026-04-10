@@ -251,7 +251,7 @@ impl TheMeshGenerator {
         let span = radius * 3.0; // Reasonable fin stick-out distance
         let fin_thickness = radius * 0.05_f64.max(0.001); // 5% of radius or minimum 1mm
 
-        let num_fins = 4;
+        let num_fins = config.geometry.num_fins;
         let fin_top_z = top_z - fin_offset;
         let fin_bot_z = fin_top_z - fin_chord;
 

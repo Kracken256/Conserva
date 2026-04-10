@@ -68,6 +68,8 @@ pub struct MissileGeometryConfig {
     /// volume and dictates the frontal reference area utilized in aerodynamic drag estimations. It
     /// restricts component sizing throughout the chassis.
     pub diameter: Length,
+    /// The number of fins attached to the main body.
+    pub num_fins: u32,
     /// The distance measured from the very tip of the missile's nose to the leading edge of the
     /// fins at their root. This placement is highly influential on the aerodynamic center of
     /// pressure. Shifting this surface aft generally increases passive stability bounds.
@@ -352,6 +354,7 @@ mod tests {
             },
             cylindrical_body_length: Length::new::<meter>(1.0),
             diameter: Length::new::<meter>(0.1),
+            num_fins: 4,
             fin_offset_from_nose: Length::new::<meter>(0.9),
             fin_chord_length: Length::new::<meter>(0.1),
             cg_curve: vec![],

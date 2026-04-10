@@ -65,6 +65,7 @@ pub fn get_default_config() -> MissileConfig {
             },
             cylindrical_body_length: Length::new::<meter>(1.4),
             diameter: Length::new::<meter>(0.1),
+            num_fins: 4,
             fin_offset_from_nose: Length::new::<meter>(1.2),
             fin_chord_length: Length::new::<meter>(0.2),
             cg_curve: vec![
