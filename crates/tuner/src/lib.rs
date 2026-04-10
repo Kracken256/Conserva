@@ -16,8 +16,8 @@ struct Wolf {
 }
 
 /// Professional-grade cost function for missile GNC optimization.
-fn evaluate_pi(kp: f64, ki: f64, max_time: f64, dt: f64) -> f64 {
-    let mut config = get_default_config();
+fn evaluate_pi(base_config: &MissileConfig, kp: f64, ki: f64, max_time: f64, dt: f64) -> f64 {
+    let mut config = base_config.clone();
     // Symmetric tuning for Pitch and Yaw axes
     config.controller.pitch_pi_kp = kp;
     config.controller.pitch_pi_ki = ki;
@@ -76,11 +76,11 @@ fn evaluate_pi(kp: f64, ki: f64, max_time: f64, dt: f64) -> f64 {
             fin_jitter += (angle - prev_fin_angles[i]).abs();
             prev_fin_angles[i] = angle;
         }
-        total_cost += fin_jitter * 150.0;
+        total_cost += fin_jitter * 5.0; // Reduced penalty so P can be higher
 
         // 3. Structural Load Penalty (Wobble @ Speed)
         let w_mag = twin.state.angular_velocity.map(|v| v.value).norm();
-        total_cost += (w_mag * vel.norm() * 0.05) * dt;
+        total_cost += (w_mag * vel.norm() * 0.005) * dt; // Reduced wobble penalty
 
         // 4. Critical Failure Constraints
         if w_mag > 15.0 || (pos.z < 0.0 && time > 0.5) {
@@ -91,7 +91,8 @@ fn evaluate_pi(kp: f64, ki: f64, max_time: f64, dt: f64) -> f64 {
         if dist < 4.0 {
             let alignment = 1.0 - (vel.dot(&error_vec) / (vel.norm() * dist)).clamp(-1.0, 1.0);
             let alignment_penalty = alignment * 10000.0;
-            let gain_reg = (kp.powi(2) + ki.powi(2)) * 100.0;
+            // Removed drastic gain_reg that strongly suppressed P and I
+            let gain_reg = (kp.powi(2) + ki.powi(2)) * 1.0;
             return total_cost + (time * 5.0) + alignment_penalty + gain_reg;
         }
     }
@@ -100,27 +101,19 @@ fn evaluate_pi(kp: f64, ki: f64, max_time: f64, dt: f64) -> f64 {
     total_cost + (min_dist.powi(2) * 50.0) + 100_000.0
 }
 
-fn main() {
-    let mut dt = 0.001;
-    let mut iterations = 60;
+/// Standard GWO position update logic
+fn gwo_update(target_gain: f64, current_gain: f64, a: f64, rng: &mut impl Rng) -> f64 {
+    let r1: f64 = rng.r#gen();
+    let r2: f64 = rng.r#gen();
 
-    let args: Vec<String> = std::env::args().collect();
-    let mut i = 1;
-    while i < args.len() {
-        if args[i] == "--dt" && i + 1 < args.len() {
-            dt = args[i + 1]
-                .parse()
-                .expect("--dt must be a valid f64 number");
-            i += 1;
-        } else if args[i] == "--epochs" && i + 1 < args.len() {
-            iterations = args[i + 1]
-                .parse()
-                .expect("--epochs must be a valid integer");
-            i += 1;
-        }
-        i += 1;
-    }
+    let a_vec = 2.0 * a * r1 - a;
+    let c_vec = 2.0 * r2;
 
+    let d = (c_vec * target_gain - current_gain).abs();
+    target_gain - a_vec * d
+}
+
+pub fn tune_pi(base_config: &MissileConfig, dt: f64, iterations: usize) {
     let num_wolves = 50;
     let bounds_max = [1.0, 0.5]; // Kp, Ki limits
 
@@ -158,9 +151,8 @@ fn main() {
 
     for iter in 0..iterations {
         // Parallel Fitness Evaluation
-        let mut scores: Vec<f64> = vec![0.0; num_wolves];
         population.par_iter_mut().for_each(|wolf| {
-            wolf.score = evaluate_pi(wolf.gains[0], wolf.gains[1], 30.0, dt);
+            wolf.score = evaluate_pi(base_config, wolf.gains[0], wolf.gains[1], 30.0, dt);
         });
 
         // Update Alpha, Beta, Delta (the three best wolves)
@@ -207,16 +199,4 @@ fn main() {
         "Final Optimal Gains: Kp={:.6}, Ki={:.6}",
         alpha.gains[0], alpha.gains[1]
     );
-}
-
-/// Standard GWO position update logic
-fn gwo_update(target_gain: f64, current_gain: f64, a: f64, rng: &mut impl Rng) -> f64 {
-    let r1: f64 = rng.r#gen();
-    let r2: f64 = rng.r#gen();
-
-    let a_vec = 2.0 * a * r1 - a;
-    let c_vec = 2.0 * r2;
-
-    let d = (c_vec * target_gain - current_gain).abs();
-    target_gain - a_vec * d
 }
