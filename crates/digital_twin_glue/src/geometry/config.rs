@@ -214,25 +214,25 @@ pub struct MissileControllerConfig {
     /// how aggressively the controller immediately applies correcting moments relative to the
     /// absolute current pitch error scale. High values quicken responsiveness but run the risk of
     /// triggering severe oscillations.
-    pub pitch_pi_kp: f64,
+    pub pitch_pi_kp: Vec<(Time, f64)>,
 
     /// The integral gain tuning constant for the automated pitch control loop. It aggregates and
     /// counters accumulated error histories to wash out steady-state offsets—like persistent
     /// gravity sag. However, an excessively large value often manifests as delayed overshoots and
     /// integral windups.
-    pub pitch_pi_ki: f64,
+    pub pitch_pi_ki: Vec<(Time, f64)>,
 
     /// The unscaled proportional gain factor controlling the horizontal thrust vector control and
     /// fin yaw loop. It produces immediate physical reactions when the current telemetry heading
     /// deviates from the navigational target heading. Proper tuning tightens flight tracking
     /// capabilities against active lateral constraints.
-    pub yaw_pi_kp: f64,
+    pub yaw_pi_kp: Vec<(Time, f64)>,
 
     /// The foundational integral multiplier backing the horizontal yaw control loop tuning. It
     /// steadily ramps up correction commands if the heading persistently lingers off-band due to
     /// unresolved continuous disturbances. This function acts primarily to negate sustained
     /// environmental crosswinds over an extended trajectory.
-    pub yaw_pi_ki: f64,
+    pub yaw_pi_ki: Vec<(Time, f64)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -673,5 +673,57 @@ mod tests {
         assert_eq!(tensor_late[(0, 0)], 3.0);
         assert_eq!(tensor_late[(1, 1)], 4.0);
         assert_eq!(tensor_late[(2, 2)], 5.0);
+    }
+}
+
+impl MissileControllerConfig {
+    fn interpolate_gain(points: &Vec<(Time, f64)>, time: Time) -> f64 {
+        if points.is_empty() {
+            return 0.0;
+        }
+
+        let t = time.get::<second>();
+        let first_t = points[0].0.get::<second>();
+        let last_t = points.last().unwrap().0.get::<second>();
+
+        if t <= first_t {
+            return points[0].1;
+        }
+        if t >= last_t {
+            return points.last().unwrap().1;
+        }
+
+        for i in 0..points.len() - 1 {
+            let t0 = points[i].0.get::<second>();
+            let t1 = points[i + 1].0.get::<second>();
+
+            if t >= t0 && t <= t1 {
+                let g0 = points[i].1;
+                let g1 = points[i + 1].1;
+                let percent = (t - t0) / (t1 - t0);
+                return g0 + (g1 - g0) * percent;
+            }
+        }
+        points.last().unwrap().1
+    }
+
+    /// Linearly interpolates the scheduled pitch Kp gain based on flight time.
+    pub fn current_pitch_kp(&self, time: Time) -> f64 {
+        Self::interpolate_gain(&self.pitch_pi_kp, time)
+    }
+
+    /// Linearly interpolates the scheduled pitch Ki gain based on flight time.
+    pub fn current_pitch_ki(&self, time: Time) -> f64 {
+        Self::interpolate_gain(&self.pitch_pi_ki, time)
+    }
+
+    /// Linearly interpolates the scheduled yaw Kp gain based on flight time.
+    pub fn current_yaw_kp(&self, time: Time) -> f64 {
+        Self::interpolate_gain(&self.yaw_pi_kp, time)
+    }
+
+    /// Linearly interpolates the scheduled yaw Ki gain based on flight time.
+    pub fn current_yaw_ki(&self, time: Time) -> f64 {
+        Self::interpolate_gain(&self.yaw_pi_ki, time)
     }
 }

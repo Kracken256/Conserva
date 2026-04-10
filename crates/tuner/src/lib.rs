@@ -5,8 +5,9 @@ use nalgebra::Vector3;
 use rand::Rng;
 use rayon::prelude::*;
 use uom::si::angle::radian;
-use uom::si::f64::Length;
+use uom::si::f64::{Length, Time};
 use uom::si::length::meter;
+use uom::si::time::second;
 use uom::si::velocity::meter_per_second;
 
 #[derive(Clone, Debug)]
@@ -25,11 +26,12 @@ fn evaluate_pi(
     dt: f64,
 ) -> f64 {
     let mut config = base_config.clone();
+    let t0 = Time::new::<second>(0.0);
     // Symmetric tuning for Pitch and Yaw axes
-    config.controller.pitch_pi_kp = kp;
-    config.controller.pitch_pi_ki = ki;
-    config.controller.yaw_pi_kp = kp;
-    config.controller.yaw_pi_ki = ki;
+    config.controller.pitch_pi_kp = vec![(t0, kp)];
+    config.controller.pitch_pi_ki = vec![(t0, ki)];
+    config.controller.yaw_pi_kp = vec![(t0, kp)];
+    config.controller.yaw_pi_ki = vec![(t0, ki)];
 
     let state = get_initial_state(&config);
 
@@ -73,11 +75,9 @@ fn evaluate_pi(
         }
 
         // 1. Time-Weighted Error (ITAE)
-        // Gradually increases the penalty for being far away as time goes on
         total_cost += dist * (1.0 + time * 0.5) * dt;
 
-        // 2. Control Surface Jitter (Delta-U Penalty for servo health)
-        // Keep this low so that the optimizer isn't overly afraid to steer
+        // 2. Control Surface Jitter
         let mut fin_jitter = 0.0;
         for i in 0..4 {
             let angle = twin.state.fin_angles[i].get::<radian>();
@@ -86,63 +86,67 @@ fn evaluate_pi(
         }
         total_cost += fin_jitter * 1.0;
 
-        // 3. Structural Load Penalty (Wobble @ Speed)
+        // 3. Structural Load Penalty
         let w_mag = twin.state.angular_velocity.map(|v| v.value).norm();
         total_cost += (w_mag * vel.norm() * 0.005) * dt;
 
-        // If we missed the target and are moving away, terminate early to save CPU
-        // We only start applying this after 2.0 seconds to give the launch thrust time to take over,
-        // using the correct world-frame velocity.
         if time > 2.0 && dist > 50.0 && world_vel.dot(&error_vec) < 0.0 {
-            // Missile is flying away from the target. Fast-fail it.
             return total_cost + (min_dist.powi(2) * 100.0) + 600_000.0;
         }
 
-        // 4. Critical Failure Constraints
         if w_mag > 15.0 || (pos.z < 0.0 && time > 0.5) {
-            // DO NOT return 1e12! That creates a flat plateau and destroys all gradient information.
-            // Instead, heavily penalize the failure but still reward runs that got closer to the target first.
             return total_cost + (min_dist.powi(2) * 100.0) + 500_000.0;
         }
 
-        // 5. Success Condition
         if dist < 4.0 {
             let v_norm = world_vel.norm().max(0.001);
             let alignment = 1.0 - (world_vel.dot(&error_vec) / (v_norm * dist)).clamp(-1.0, 1.0);
             let alignment_penalty = alignment * 10000.0;
-            // Tiny regularization just to prevent P and I from wandering around unnecessarily when successful
             let gain_reg = (kp * 1.0) + (ki * 0.1);
             return total_cost + (time * 10.0) + alignment_penalty + gain_reg;
         }
     }
 
-    // Failure: Did not reach target within time limit.
-    // Ensure failure continues to provide strong distance-focused gradient.
     total_cost + (min_dist.powi(2) * 50.0) + 1_000_000.0
 }
 
-/// Standard GWO position update logic
 fn gwo_update(target_gain: f64, current_gain: f64, a: f64, rng: &mut impl Rng) -> f64 {
     let r1: f64 = rng.r#gen();
     let r2: f64 = rng.r#gen();
-
     let a_vec = 2.0 * a * r1 - a;
     let c_vec = 2.0 * r2;
-
     let d = (c_vec * target_gain - current_gain).abs();
     target_gain - a_vec * d
 }
 
-pub fn tune_pi(base_config: &MissileConfig, target: Vector3<f64>, dt: f64, iterations: usize) {
+fn tune_frozen_stage(
+    stage_time: f64,
+    stage_name: &str,
+    base_config: &MissileConfig,
+    target: Vector3<f64>,
+    dt: f64,
+    iterations: usize,
+) -> [f64; 2] {
+    let mut config = base_config.clone();
+    let sample_time = Time::new::<second>(stage_time);
+    
+    // Freeze the physics properties at this specific time step
+    let initial_mass = config.mass.current_mass(sample_time);
+    let initial_cg = config.geometry.current_cg(sample_time);
+    let initial_inertia = config.mass.current_inertia_tensor(sample_time);
+    
+    config.mass.mass_curve = vec![(Time::new::<second>(0.0), initial_mass)];
+    config.geometry.cg_curve = vec![(Time::new::<second>(0.0), initial_cg)];
+    config.mass.inertia_tensor_curve = vec![(Time::new::<second>(0.0), initial_inertia)];
+
     let num_wolves = 100;
-    let bounds_max = [1.0, 1.0]; // Kp, Ki limits
+    let bounds_max = [1.0, 1.0];
 
     println!(
-        "Starting Grey Wolf Optimizer (GWO) for PI Tuning with dt = {}, {} wolves for {} epochs...",
-        dt, num_wolves, iterations
+        "\n--- Tuning Stage: {} (t={}s) ---",
+        stage_name, stage_time
     );
 
-    // Initialize population randomly
     let mut population: Vec<Wolf> = (0..num_wolves)
         .map(|_| {
             let mut rng = rand::thread_rng();
@@ -163,35 +167,24 @@ pub fn tune_pi(base_config: &MissileConfig, target: Vector3<f64>, dt: f64, itera
     let pb = ProgressBar::new(iterations as u64);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template(
-                "[{elapsed_precise} < {eta_precise}] [{bar:40.cyan/blue}] {pos}/{len} | {msg}",
-            )
+            .template("[{elapsed_precise} < {eta_precise}] [{bar:40.cyan/blue}] {pos}/{len} | {msg}")
             .unwrap(),
     );
 
     for iter in 0..iterations {
-        // Parallel Fitness Evaluation
         population.par_iter_mut().for_each(|wolf| {
-            wolf.score = evaluate_pi(base_config, target, wolf.gains[0], wolf.gains[1], 30.0, dt);
+            // max_time can be shorter for frozen tuning since it's an instantaneous response check
+            wolf.score = evaluate_pi(&config, target, wolf.gains[0], wolf.gains[1], 15.0, dt);
         });
 
-        // Update Alpha, Beta, Delta (the three best wolves)
         population.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap());
 
-        if population[0].score < alpha.score {
-            alpha = population[0].clone();
-        }
-        if population[1].score < beta.score {
-            beta = population[1].clone();
-        }
-        if population[2].score < delta.score {
-            delta = population[2].clone();
-        }
+        if population[0].score < alpha.score { alpha = population[0].clone(); }
+        if population[1].score < beta.score { beta = population[1].clone(); }
+        if population[2].score < delta.score { delta = population[2].clone(); }
 
-        // Linearly decreasing parameter 'a' from 2 to 0
         let a = 2.0 * (1.0 - (iter as f64 / iterations as f64));
 
-        // Update positions based on leaders
         population.par_iter_mut().for_each(|wolf| {
             let mut rng = rand::thread_rng();
             let mut next_gains = [0.0; 2];
@@ -200,7 +193,6 @@ pub fn tune_pi(base_config: &MissileConfig, target: Vector3<f64>, dt: f64, itera
                 let x1 = gwo_update(alpha.gains[i], wolf.gains[i], a, &mut rng);
                 let x2 = gwo_update(beta.gains[i], wolf.gains[i], a, &mut rng);
                 let x3 = gwo_update(delta.gains[i], wolf.gains[i], a, &mut rng);
-
                 next_gains[i] = ((x1 + x2 + x3) / 3.0).clamp(0.0, bounds_max[i]);
             }
             wolf.gains = next_gains;
@@ -214,9 +206,56 @@ pub fn tune_pi(base_config: &MissileConfig, target: Vector3<f64>, dt: f64, itera
     }
 
     pb.finish();
-    println!("\n--- Optimization Complete ---");
-    println!(
-        "Final Optimal Gains: Kp={:.6}, Ki={:.6}",
-        alpha.gains[0], alpha.gains[1]
-    );
+    println!("Stage Optimal Gains: Kp={:.6}, Ki={:.6}", alpha.gains[0], alpha.gains[1]);
+    alpha.gains
+}
+
+pub fn tune_pi(base_config: &MissileConfig, target: Vector3<f64>, dt: f64, iterations: usize) {
+    println!("Starting Gain Scheduling Optimizer with dt = {}", dt);
+    
+    let stages = vec![
+        (0.0, "Ignition (Wet)"),
+        (5.2, "Mid-burn"),
+        (10.4, "Burnout (Dry)"),
+    ];
+
+    let mut scheduled_gains = Vec::new();
+
+    for (time, name) in stages {
+        let best_gains = tune_frozen_stage(time, name, base_config, target, dt, iterations);
+        scheduled_gains.push((time, best_gains));
+    }
+
+    println!("\n=============================================");
+    println!("FINAL GAIN SCHEDULING LOOKUP TABLE (Copy to defaults.rs)");
+    println!("=============================================");
+    
+    println!("        controller: MissileControllerConfig {{");
+    
+    print!("            pitch_pi_kp: vec![");
+    for (t, gains) in &scheduled_gains {
+        print!("(Time::new::<second>({:.1}), {:.6}), ", t, gains[0]);
+    }
+    println!("],");
+
+    print!("            pitch_pi_ki: vec![");
+    for (t, gains) in &scheduled_gains {
+        print!("(Time::new::<second>({:.1}), {:.6}), ", t, gains[1]);
+    }
+    println!("],");
+
+    print!("            yaw_pi_kp: vec![");
+    for (t, gains) in &scheduled_gains {
+        print!("(Time::new::<second>({:.1}), {:.6}), ", t, gains[0]);
+    }
+    println!("],");
+
+    print!("            yaw_pi_ki: vec![");
+    for (t, gains) in &scheduled_gains {
+        print!("(Time::new::<second>({:.1}), {:.6}), ", t, gains[1]);
+    }
+    println!("],");
+    
+    println!("        }},");
+    println!("=============================================\n");
 }

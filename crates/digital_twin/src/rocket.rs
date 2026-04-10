@@ -23,10 +23,23 @@ impl Pi {
         }
     }
 
-    pub fn update(&mut self, error: f64, dt: f64) -> f64 {
+    pub fn update(&mut self, error: f64, new_kp: f64, new_ki: f64, dt: f64) -> f64 {
         if dt <= 0.0 {
             return 0.0;
         }
+
+        // Anti-Windup / Gain Scheduling integral sum scaling
+        // If Ki changes significantly, scale the accumulated integral
+        // so that the total integral effort (ki * integral) remains continuous.
+        // Prevent division by zero if ki was previously zero.
+        if self.ki > 1e-6 && new_ki > 1e-6 && (self.ki - new_ki).abs() > 1e-4 {
+            self.integral *= self.ki / new_ki;
+        } else if new_ki <= 1e-6 {
+            self.integral = 0.0;
+        }
+
+        self.kp = new_kp;
+        self.ki = new_ki;
 
         self.integral += error * dt;
 
@@ -46,8 +59,15 @@ pub struct FlightComputer {
 
 impl FlightComputer {
     pub fn new(config: MissileConfig, target_waypoint: Option<Vector3<Length>>) -> Self {
-        let pitch_pi = Pi::new(config.controller.pitch_pi_kp, config.controller.pitch_pi_ki);
-        let yaw_pi = Pi::new(config.controller.yaw_pi_kp, config.controller.yaw_pi_ki);
+        let current_time = Time::new::<second>(0.0);
+        let pitch_pi = Pi::new(
+            config.controller.current_pitch_kp(current_time),
+            config.controller.current_pitch_ki(current_time),
+        );
+        let yaw_pi = Pi::new(
+            config.controller.current_yaw_kp(current_time),
+            config.controller.current_yaw_ki(current_time),
+        );
 
         Self {
             config,
@@ -63,31 +83,36 @@ impl FlightComputer {
     /// generate PI control commands, and move the actuating servos.
     pub fn tick(&mut self, state: &MissileState, dt: f64) -> MissileState {
         let mut new_state = state.clone();
-
-        // 1. Advance the firmware cycle clock
         self.time += dt;
 
-        // 2. Gather IMU angular velocity
-        let w_pitch = state.angular_velocity[0].get::<radian_per_second>();
-        let w_yaw = state.angular_velocity[1].get::<radian_per_second>();
-
-        // 3. Command: Compute desired rates to steer towards waypoint, or default to zero
+        // 1. Gather IMU and compute intended steering rates
         let (target_w_pitch, target_w_yaw) = self.compute_target_rates(state);
+        let error_pitch = target_w_pitch - state.angular_velocity[0].get::<radian_per_second>();
+        let error_yaw = target_w_yaw - state.angular_velocity[1].get::<radian_per_second>();
 
-        // 4. Compute error between IMU and intent
-        let error_pitch = target_w_pitch - w_pitch;
-        let error_yaw = target_w_yaw - w_yaw;
+        // 2. Schedule PI gains and update controllers
+        let current_time = Time::new::<second>(self.time);
 
-        // 5. Update PI
-        let pitch_cmd = self.pitch_pi.update(error_pitch, dt);
-        let yaw_cmd = self.yaw_pi.update(error_yaw, dt);
+        let pitch_cmd = self.pitch_pi.update(
+            error_pitch,
+            self.config.controller.current_pitch_kp(current_time),
+            self.config.controller.current_pitch_ki(current_time),
+            dt,
+        );
 
-        // 6. Actuate: Command TVC/Fins servos respecting structural boundaries (e.g. +/- 20 degrees)
+        let yaw_cmd = self.yaw_pi.update(
+            error_yaw,
+            self.config.controller.current_yaw_kp(current_time),
+            self.config.controller.current_yaw_ki(current_time),
+            dt,
+        );
+
+        // 3. Actuate: Command TVC/Fins servos respecting structural boundaries
         let (pitch_angle, yaw_angle) = self.actuate(state, pitch_cmd, yaw_cmd, dt);
         new_state.tvc_angles[0] = pitch_angle;
         new_state.tvc_angles[1] = yaw_angle;
 
-        // 7. Update Engine and Mass Properties
+        // 4. Update Engine and Mass Properties
         self.update_physics_properties(&mut new_state);
 
         new_state
@@ -302,15 +327,15 @@ mod tests {
     #[test]
     fn pi_proportional_response() {
         let mut pi = Pi::new(2.0, 0.0);
-        let cmd = pi.update(5.0, 0.1);
+        let cmd = pi.update(5.0, 2.0, 0.0, 0.1);
         assert!((cmd - 10.0).abs() < 1e-6, "P control failed");
     }
 
     #[test]
     fn pi_integral_response() {
         let mut pi = Pi::new(0.0, 2.0);
-        pi.update(5.0, 0.1); // error * dt * ki = 5 * 0.1 * 2 = 1.0
-        let cmd1 = pi.update(5.0, 0.1); // integral becomes 1.0 + 1.0 = 2.0
+        pi.update(5.0, 0.0, 2.0, 0.1); // error * dt * ki = 5 * 0.1 * 2 = 1.0
+        let cmd1 = pi.update(5.0, 0.0, 2.0, 0.1); // integral becomes 1.0 + 1.0 = 2.0
         assert!((cmd1 - 2.0).abs() < 1e-6, "I control failed");
     }
 
@@ -388,8 +413,8 @@ mod tests {
         let mut config = get_default_config();
         let state = get_initial_state(&config);
         // Give some PI values to ensure commands are generated
-        config.controller.pitch_pi_kp = 1.0;
-        config.controller.yaw_pi_kp = 1.0;
+        config.controller.pitch_pi_kp = vec![(Time::new::<second>(0.0), 1.0)];
+        config.controller.yaw_pi_kp = vec![(Time::new::<second>(0.0), 1.0)];
 
         let waypoint = Some(Vector3::new(
             Length::new::<meter>(500.0), // Off to the side in +X
@@ -427,7 +452,7 @@ mod tests {
 
         let state = get_initial_state(&config);
 
-        config.controller.pitch_pi_kp = 100.0; // ensure large command
+        config.controller.pitch_pi_kp = vec![(Time::new::<second>(0.0), 100.0)]; // ensure large command
 
         let waypoint = Some(Vector3::new(
             Length::new::<meter>(0.0),
@@ -460,7 +485,7 @@ mod tests {
 
         let state = get_initial_state(&config);
 
-        config.controller.pitch_pi_kp = 10.0;
+        config.controller.pitch_pi_kp = vec![(Time::new::<second>(0.0), 10.0)];
 
         let waypoint = Some(Vector3::new(
             Length::new::<meter>(0.0),
