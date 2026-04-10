@@ -69,7 +69,7 @@ To ensure the simulation remains grounded in physical reality, the Thrust Vector
 
 While high-fidelity, the current geometric engine operates under the following constraints:
 
-1.  **Radial Symmetry:** All fins in a `fin_set` are assumed to be identical and spaced evenly ($360^\circ / \text{num\_fins}$).
+1.  **Radial Symmetry:** All fins in a `fin_set` are assumed to be identical and spaced evenly (360° / `num_fins`).
 2.  **Rigid-Body Dynamics:** The airframe and fins are assumed to be perfectly rigid. **Aeroelasticity** (vibration, flutter, or structural bending) is not currently modeled.
 3.  **Constant Body Diameter:** The `cylindrical_body_length` assumes a uniform diameter. The engine does not natively support "boattails" (tapered aft sections) or "flares" without manual mesh intervention.
 4.  **Single-Stage Focus:** The current configuration is optimized for single-stage vehicles; multi-stage separation events require external state-machine handling.
