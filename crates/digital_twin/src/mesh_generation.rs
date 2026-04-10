@@ -9,13 +9,15 @@ impl MeshGenerator for TheMeshGenerator {
     fn generate(&self, state: &MissileState, config: &MissileConfig, mesh: &mut Mesh) {
         let radius = config.geometry.diameter.get::<meter>() / 2.0;
         let body_length = config.geometry.cylindrical_body_length.get::<meter>();
+        let nose_length = config.geometry.nosecone_shape.length().get::<meter>();
+        let total_length = body_length + nose_length;
 
         // Fetch dynamic Center of Gravity (CoG) from curve
         let cg = config.geometry.current_cg(state.time);
 
         // Apply CoG shift to all root Z anchors
-        let top_z = body_length / 2.0 - cg.z.get::<meter>();
-        let base_z = -body_length / 2.0 - cg.z.get::<meter>();
+        let top_z = total_length / 2.0 - cg.z.get::<meter>();
+        let base_z = -total_length / 2.0 - cg.z.get::<meter>();
 
         let sectors = 64; // High fidelity cylinder
         let nose_stacks = 32; // High fidelity nose
@@ -387,7 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn mesh_total_length_equals_body_length() {
+    fn mesh_total_length_equals_body_plus_nose_length() {
         let config = get_default_config();
         let state = get_initial_state(&config);
         let mut mesh = Mesh::default();
@@ -406,12 +408,13 @@ mod tests {
             .map(|v| v.z)
             .fold(f64::INFINITY, f64::min);
         let calculated_length = max_z - min_z;
-        let expected_length = config.geometry.cylindrical_body_length.value;
+        let expected_length = config.geometry.cylindrical_body_length.value
+            + config.geometry.nosecone_shape.length().value;
 
         // Allow a tiny floating-point margin
         assert!(
             (calculated_length - expected_length).abs() < 1e-6,
-            "Mesh length {} does not match expected body length {}",
+            "Mesh length {} does not match expected total length {}",
             calculated_length,
             expected_length
         );

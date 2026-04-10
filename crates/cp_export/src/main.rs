@@ -11,6 +11,8 @@ fn main() -> std::io::Result<()> {
     let config = get_default_config();
     let mesh_generator = TheMeshGenerator::default();
     let body_length = config.geometry.cylindrical_body_length.get::<meter>();
+    let nose_length = config.geometry.nosecone_shape.length().get::<meter>();
+    let total_length = body_length + nose_length;
 
     println!("Exporting center of pressure curve...");
     let mut cp_file = File::create("cp_curve.csv")?;
@@ -61,7 +63,7 @@ fn main() -> std::io::Result<()> {
         }
 
         let z_cp_geom = z_cp_mesh + cg_fixed;
-        let cp_from_nose = body_length / 2.0 - z_cp_geom;
+        let cp_from_nose = total_length / 2.0 - z_cp_geom;
 
         writeln!(cp_file, "{:.2},{:.6}", mach, cp_from_nose)?;
         mach += 0.1;
