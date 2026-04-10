@@ -16,7 +16,14 @@ struct Wolf {
 }
 
 /// Professional-grade cost function for missile GNC optimization.
-fn evaluate_pi(base_config: &MissileConfig, kp: f64, ki: f64, max_time: f64, dt: f64) -> f64 {
+fn evaluate_pi(
+    base_config: &MissileConfig,
+    target: Vector3<f64>,
+    kp: f64,
+    ki: f64,
+    max_time: f64,
+    dt: f64,
+) -> f64 {
     let mut config = base_config.clone();
     // Symmetric tuning for Pitch and Yaw axes
     config.controller.pitch_pi_kp = kp;
@@ -25,7 +32,6 @@ fn evaluate_pi(base_config: &MissileConfig, kp: f64, ki: f64, max_time: f64, dt:
     config.controller.yaw_pi_ki = ki;
 
     let state = get_initial_state(&config);
-    let target = Vector3::new(1000.0, 1000.0, 1000.0);
 
     let rocket = TheRocket::new(
         config.clone(),
@@ -58,6 +64,7 @@ fn evaluate_pi(base_config: &MissileConfig, kp: f64, ki: f64, max_time: f64, dt:
             twin.state.body_velocity[1].get::<meter_per_second>(),
             twin.state.body_velocity[2].get::<meter_per_second>(),
         );
+        let world_vel = twin.state.orientation * vel;
 
         let error_vec = target - pos;
         let dist = error_vec.norm();
@@ -65,40 +72,53 @@ fn evaluate_pi(base_config: &MissileConfig, kp: f64, ki: f64, max_time: f64, dt:
             min_dist = dist;
         }
 
-        // 1. Exponential ITAE (Penalize late-flight errors)
-        let time_weight = (time / max_time).powi(2);
-        total_cost += dist * time_weight * dt;
+        // 1. Time-Weighted Error (ITAE)
+        // Gradually increases the penalty for being far away as time goes on
+        total_cost += dist * (1.0 + time * 0.5) * dt;
 
         // 2. Control Surface Jitter (Delta-U Penalty for servo health)
+        // Keep this low so that the optimizer isn't overly afraid to steer
         let mut fin_jitter = 0.0;
         for i in 0..4 {
             let angle = twin.state.fin_angles[i].get::<radian>();
             fin_jitter += (angle - prev_fin_angles[i]).abs();
             prev_fin_angles[i] = angle;
         }
-        total_cost += fin_jitter * 5.0; // Reduced penalty so P can be higher
+        total_cost += fin_jitter * 1.0;
 
         // 3. Structural Load Penalty (Wobble @ Speed)
         let w_mag = twin.state.angular_velocity.map(|v| v.value).norm();
-        total_cost += (w_mag * vel.norm() * 0.005) * dt; // Reduced wobble penalty
+        total_cost += (w_mag * vel.norm() * 0.005) * dt;
+
+        // If we missed the target and are moving away, terminate early to save CPU
+        // We only start applying this after 2.0 seconds to give the launch thrust time to take over,
+        // using the correct world-frame velocity.
+        if time > 2.0 && dist > 50.0 && world_vel.dot(&error_vec) < 0.0 {
+            // Missile is flying away from the target. Fast-fail it.
+            return total_cost + (min_dist.powi(2) * 100.0) + 600_000.0;
+        }
 
         // 4. Critical Failure Constraints
         if w_mag > 15.0 || (pos.z < 0.0 && time > 0.5) {
-            return 1e12; // High penalty for crashing or tumbling
+            // DO NOT return 1e12! That creates a flat plateau and destroys all gradient information.
+            // Instead, heavily penalize the failure but still reward runs that got closer to the target first.
+            return total_cost + (min_dist.powi(2) * 100.0) + 500_000.0;
         }
 
         // 5. Success Condition
         if dist < 4.0 {
-            let alignment = 1.0 - (vel.dot(&error_vec) / (vel.norm() * dist)).clamp(-1.0, 1.0);
+            let v_norm = world_vel.norm().max(0.001);
+            let alignment = 1.0 - (world_vel.dot(&error_vec) / (v_norm * dist)).clamp(-1.0, 1.0);
             let alignment_penalty = alignment * 10000.0;
-            // Removed drastic gain_reg that strongly suppressed P and I
-            let gain_reg = (kp.powi(2) + ki.powi(2)) * 1.0;
-            return total_cost + (time * 5.0) + alignment_penalty + gain_reg;
+            // Tiny regularization just to prevent P and I from wandering around unnecessarily when successful
+            let gain_reg = (kp * 1.0) + (ki * 0.1);
+            return total_cost + (time * 10.0) + alignment_penalty + gain_reg;
         }
     }
 
-    // Failure: Distance-squared penalty
-    total_cost + (min_dist.powi(2) * 50.0) + 100_000.0
+    // Failure: Did not reach target within time limit.
+    // Ensure failure continues to provide strong distance-focused gradient.
+    total_cost + (min_dist.powi(2) * 50.0) + 1_000_000.0
 }
 
 /// Standard GWO position update logic
@@ -113,9 +133,9 @@ fn gwo_update(target_gain: f64, current_gain: f64, a: f64, rng: &mut impl Rng) -
     target_gain - a_vec * d
 }
 
-pub fn tune_pi(base_config: &MissileConfig, dt: f64, iterations: usize) {
+pub fn tune_pi(base_config: &MissileConfig, target: Vector3<f64>, dt: f64, iterations: usize) {
     let num_wolves = 50;
-    let bounds_max = [1.0, 0.5]; // Kp, Ki limits
+    let bounds_max = [1.0, 1.0]; // Kp, Ki limits
 
     println!(
         "Starting Grey Wolf Optimizer (GWO) for PI Tuning with dt = {}, {} wolves for {} epochs...",
@@ -152,7 +172,7 @@ pub fn tune_pi(base_config: &MissileConfig, dt: f64, iterations: usize) {
     for iter in 0..iterations {
         // Parallel Fitness Evaluation
         population.par_iter_mut().for_each(|wolf| {
-            wolf.score = evaluate_pi(base_config, wolf.gains[0], wolf.gains[1], 30.0, dt);
+            wolf.score = evaluate_pi(base_config, target, wolf.gains[0], wolf.gains[1], 30.0, dt);
         });
 
         // Update Alpha, Beta, Delta (the three best wolves)
