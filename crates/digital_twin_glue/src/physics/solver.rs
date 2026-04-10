@@ -972,4 +972,83 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_turbulent_skin_friction_sea_level() {
+        let mut solver = AeroSolver::default();
+        let sos = 340.0;
+        let v_z = 200.0; // Fast enough for Re > 1e5
+        let state = create_dummy_state(Vector3::new(0.0, 0.0, v_z), Vector3::zeros());
+
+        // Sideways facing normals mean zero normal pressure component.
+        let n = Vector3::new(1.0, 0.0, 0.0);
+        let mesh = create_faces(&[n, n, n, n], &[1.0, 1.0, 1.0, 1.0], &[Vector3::zeros(); 4]);
+
+        let out = solver.calculate_forces(&mesh, &state, 1.225, sos, 1.8e-5);
+
+        // n dot v_loc = 0 -> purely tangential sliding flow
+        // Re = (1.225 * 200 * 1.0) / 1.8e-5 = 13,611,111.11 (>1e5)
+        // Mach = 200 / 340 = 0.588
+        // Knudsen = 1.482 * 0.588 / 13,611,111 = 6.4e-8 (negligible slip)
+        // C_f = 0.074 * (Re)^-0.2 = ~0.00277
+        // q = 0.5 * 1.225 * 200^2 = 24500
+        // Expected tangent drag Fz = -24500 * 0.00277 * 4.0 = -271.44
+        assert_approx_eq(out.force.z, -271.44, 2.0);
+
+        // Base suction also applies because cos_theta <= 1e-6 (it is exactly 0).
+        // Leeward Cp at Mach 0.588 is -0.1.
+        // Expected normal force Fx = -(Cp) * q * Area = 0.1 * 24500 * 4.0 = 9800.0
+        assert_approx_eq(out.force.x, 9800.0, 1.0);
+        assert_approx_eq(out.force.y, 0.0, 1e-4);
+    }
+
+    #[test]
+    fn test_laminar_skin_friction_low_reynolds() {
+        let mut solver = AeroSolver::default();
+        let sos = 340.0;
+        let v_z = 0.1; // Extremely slow, Re < 1e5
+        let state = create_dummy_state(Vector3::new(0.0, 0.0, v_z), Vector3::zeros());
+
+        let n = Vector3::new(1.0, 0.0, 0.0);
+        let mesh = create_faces(&[n, n, n, n], &[1.0, 1.0, 1.0, 1.0], &[Vector3::zeros(); 4]);
+
+        let out = solver.calculate_forces(&mesh, &state, 1.225, sos, 1.8e-5);
+
+        // Re = (1.225 * 0.1 * 1.0) / 1.8e-5 = 6805.5 (<1e5)
+        // Laminar fallback C_f = 0.002
+        // q = 0.5 * 1.225 * 0.1^2 = 0.006125
+        // Expected tangent drag Fz = -0.006125 * 0.002 * 4.0 = -0.000049
+        assert_approx_eq(out.force.z, -0.000049, 1e-6);
+
+        // Base suction Cp = -0.1
+        // Fx = 0.1 * 0.006125 * 4.0 = 0.00245
+        assert_approx_eq(out.force.x, 0.00245, 1e-5);
+    }
+
+    #[test]
+    fn test_subsonic_compressibility_scaling() {
+        let mut solver = AeroSolver::default();
+        let sos = 340.0;
+        let n = Vector3::new(0.0, 0.0, 1.0);
+        let mesh = create_faces(&[n], &[1.0], &[Vector3::zeros()]);
+
+        // Mach 0.1
+        let v_z_01 = 0.1 * sos;
+        let state_01 = create_dummy_state(Vector3::new(0.0, 0.0, v_z_01), Vector3::zeros());
+        let out_01 = solver.calculate_forces(&mesh, &state_01, 1.225, sos, 1.8e-5);
+        let q_01 = 0.5 * 1.225 * v_z_01.powi(2);
+        let cp_01 = out_01.force.z.abs() / q_01; // C_p = Force / (q * Area)
+        assert_approx_eq(cp_01, 2.010, 0.01);
+
+        // Mach 0.7
+        let v_z_07 = 0.7 * sos;
+        let state_07 = create_dummy_state(Vector3::new(0.0, 0.0, v_z_07), Vector3::zeros());
+        let out_07 = solver.calculate_forces(&mesh, &state_07, 1.225, sos, 1.8e-5);
+        let q_07 = 0.5 * 1.225 * v_z_07.powi(2);
+        let cp_07 = out_07.force.z.abs() / q_07;
+        assert_approx_eq(cp_07, 2.800, 0.01);
+
+        // Verify C_p increases as Mach -> 1.0 due to Prandtl-Glauert singularity
+        assert!(cp_07 > cp_01);
+    }
 }
