@@ -86,7 +86,7 @@ if __name__ == '__main__':
     target_waypoint = Entity(
         model='sphere',
         color=color.red,
-        scale=(50, 50, 50),
+        scale=(10, 10, 10),
         # Ensure it maps to Ursina coordinates (z mapped to y)
         position=(0, 0, 0)
     )
