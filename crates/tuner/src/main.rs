@@ -11,20 +11,18 @@ use uom::si::velocity::meter_per_second;
 
 #[derive(Clone, Debug)]
 struct Wolf {
-    gains: [f64; 3], // [Kp, Ki, Kd]
+    gains: [f64; 2], // [Kp, Ki]
     score: f64,
 }
 
 /// Professional-grade cost function for missile GNC optimization.
-fn evaluate_pid(kp: f64, ki: f64, kd: f64, max_time: f64, dt: f64) -> f64 {
+fn evaluate_pi(kp: f64, ki: f64, max_time: f64, dt: f64) -> f64 {
     let mut config = get_default_config();
     // Symmetric tuning for Pitch and Yaw axes
-    config.controller.pitch_pid_kp = kp;
-    config.controller.pitch_pid_ki = ki;
-    config.controller.pitch_pid_kd = kd;
-    config.controller.yaw_pid_kp = kp;
-    config.controller.yaw_pid_ki = ki;
-    config.controller.yaw_pid_kd = kd;
+    config.controller.pitch_pi_kp = kp;
+    config.controller.pitch_pi_ki = ki;
+    config.controller.yaw_pi_kp = kp;
+    config.controller.yaw_pi_ki = ki;
 
     let state = get_initial_state(&config);
     let target = Vector3::new(1000.0, 1000.0, 1000.0);
@@ -93,7 +91,7 @@ fn evaluate_pid(kp: f64, ki: f64, kd: f64, max_time: f64, dt: f64) -> f64 {
         if dist < 4.0 {
             let alignment = 1.0 - (vel.dot(&error_vec) / (vel.norm() * dist)).clamp(-1.0, 1.0);
             let alignment_penalty = alignment * 10000.0;
-            let gain_reg = (kp.powi(2) + kd.powi(2)) * 100.0;
+            let gain_reg = (kp.powi(2) + ki.powi(2)) * 100.0;
             return total_cost + (time * 5.0) + alignment_penalty + gain_reg;
         }
     }
@@ -124,10 +122,10 @@ fn main() {
     }
 
     let num_wolves = 50;
-    let bounds_max = [1.0, 0.5, 1.0]; // Kp, Ki, Kd limits
+    let bounds_max = [1.0, 0.5]; // Kp, Ki limits
 
     println!(
-        "Starting Grey Wolf Optimizer (GWO) for PID Tuning with dt = {}, {} wolves for {} epochs...",
+        "Starting Grey Wolf Optimizer (GWO) for PI Tuning with dt = {}, {} wolves for {} epochs...",
         dt, num_wolves, iterations
     );
 
@@ -139,7 +137,6 @@ fn main() {
                 gains: [
                     rng.gen_range(0.0..bounds_max[0]),
                     rng.gen_range(0.0..bounds_max[1]),
-                    rng.gen_range(0.0..bounds_max[2]),
                 ],
                 score: f64::MAX,
             }
@@ -163,7 +160,7 @@ fn main() {
         // Parallel Fitness Evaluation
         let mut scores: Vec<f64> = vec![0.0; num_wolves];
         population.par_iter_mut().for_each(|wolf| {
-            wolf.score = evaluate_pid(wolf.gains[0], wolf.gains[1], wolf.gains[2], 30.0, dt);
+            wolf.score = evaluate_pi(wolf.gains[0], wolf.gains[1], 30.0, dt);
         });
 
         // Update Alpha, Beta, Delta (the three best wolves)
@@ -185,9 +182,9 @@ fn main() {
         // Update positions based on leaders
         population.par_iter_mut().for_each(|wolf| {
             let mut rng = rand::thread_rng();
-            let mut next_gains = [0.0; 3];
+            let mut next_gains = [0.0; 2];
 
-            for i in 0..3 {
+            for i in 0..2 {
                 let x1 = gwo_update(alpha.gains[i], wolf.gains[i], a, &mut rng);
                 let x2 = gwo_update(beta.gains[i], wolf.gains[i], a, &mut rng);
                 let x3 = gwo_update(delta.gains[i], wolf.gains[i], a, &mut rng);
@@ -199,16 +196,16 @@ fn main() {
 
         pb.inc(1);
         pb.set_message(format!(
-            "Score: {:.2} | [P:{:.6} I:{:.6} D:{:.6}]",
-            alpha.score, alpha.gains[0], alpha.gains[1], alpha.gains[2]
+            "Score: {:.2} | [P:{:.6} I:{:.6}]",
+            alpha.score, alpha.gains[0], alpha.gains[1]
         ));
     }
 
     pb.finish();
     println!("\n--- Optimization Complete ---");
     println!(
-        "Final Optimal Gains: Kp={:.6}, Ki={:.6}, Kd={:.6}",
-        alpha.gains[0], alpha.gains[1], alpha.gains[2]
+        "Final Optimal Gains: Kp={:.6}, Ki={:.6}",
+        alpha.gains[0], alpha.gains[1]
     );
 }
 

@@ -214,37 +214,25 @@ pub struct MissileControllerConfig {
     /// how aggressively the controller immediately applies correcting moments relative to the
     /// absolute current pitch error scale. High values quicken responsiveness but run the risk of
     /// triggering severe oscillations.
-    pub pitch_pid_kp: f64,
+    pub pitch_pi_kp: f64,
 
     /// The integral gain tuning constant for the automated pitch control loop. It aggregates and
     /// counters accumulated error histories to wash out steady-state offsets—like persistent
     /// gravity sag. However, an excessively large value often manifests as delayed overshoots and
     /// integral windups.
-    pub pitch_pid_ki: f64,
-
-    /// The derivative gain scaling factor governing the pitch control loop dampening. It estimates
-    /// future errors by observing the rate of change of the immediate pitch displacement,
-    /// preemptively braking rapid orientation shifts. This critical damping component aids in
-    /// smoothing out rapid flight maneuvers.
-    pub pitch_pid_kd: f64,
+    pub pitch_pi_ki: f64,
 
     /// The unscaled proportional gain factor controlling the horizontal thrust vector control and
     /// fin yaw loop. It produces immediate physical reactions when the current telemetry heading
     /// deviates from the navigational target heading. Proper tuning tightens flight tracking
     /// capabilities against active lateral constraints.
-    pub yaw_pid_kp: f64,
+    pub yaw_pi_kp: f64,
 
     /// The foundational integral multiplier backing the horizontal yaw control loop tuning. It
     /// steadily ramps up correction commands if the heading persistently lingers off-band due to
     /// unresolved continuous disturbances. This function acts primarily to negate sustained
     /// environmental crosswinds over an extended trajectory.
-    pub yaw_pid_ki: f64,
-
-    /// The primary derivative scaling value managing the horizontal yaw correction rate dampening.
-    /// It sharply reacts to the immediate velocity of the yaw error variation to heavily cushion
-    /// rotational movement and prevent rapid heading overshoot snaps. This stabilizing force
-    /// permits rapid horizontal intercept corrections without destructive fishtails.
-    pub yaw_pid_kd: f64,
+    pub yaw_pi_ki: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -257,7 +245,7 @@ pub struct MissileEngineConfig {
 
     /// The maximum physical deflection angle allowed by the Thrust Vector Control (TVC) nozzle
     /// gimbal actuators. This hard constraint limits the magnitude of correcting moments the
-    /// engine can generate in a single tick regardless of PID requests. Proper tuning ensures
+    /// engine can generate in a single tick regardless of PI requests. Proper tuning ensures
     /// the guidance software respects physical hardware servo limits without commanding
     /// over-travel.
     pub max_tvc_angle: Angle,
@@ -271,7 +259,7 @@ pub struct MissileEngineConfig {
     /// The exponential time constant (tau) defining the first-order lag of the TVC actuator's
     /// response from an idle or steady state towards the newly commanded displacement.
     /// This latency bounds the electromechanical settling delay inherent to physical servo
-    /// systems translating voltages into momentum. A non-zero value cushions abrupt PID step
+    /// systems translating voltages into momentum. A non-zero value cushions abrupt PI step
     /// commands dynamically.
     pub tvc_activation_delay: Time,
 }
