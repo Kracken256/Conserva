@@ -4,6 +4,7 @@ members = [
     "crates/digital_twin",
     "crates/digital_twin_glue",
     "crates/mesh_export",
+    "crates/cp_export",
     "crates/tuner",
 ]
 

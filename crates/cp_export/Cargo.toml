@@ -1,0 +1,9 @@
+[package]
+name = "cp_export"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+digital_twin = { path = "../digital_twin" }
+digital_twin_glue = { path = "../digital_twin_glue" }
+uom = { version = "0.38.0", features = ["serde"] }

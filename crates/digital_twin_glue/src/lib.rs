@@ -13,5 +13,5 @@ pub mod prelude {
         MissileMassConfig,
     };
     pub use crate::geometry::mesh::{Mesh, MeshGenerator};
-    pub use crate::physics::solver::{AeroSolver, SolverOutput};
+    pub use crate::physics::solver::{AeroSolver, SolverOutput, lookup_atmosphere};
 }

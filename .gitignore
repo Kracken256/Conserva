@@ -4,3 +4,4 @@ rocket.obj
 models_compressed/rocket.bam
 missile.config.json
 missile.flight.json
+cp_curve.csv
