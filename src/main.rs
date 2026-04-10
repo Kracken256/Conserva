@@ -144,7 +144,7 @@ fn main() {
             let distance = (dx * dx + dy * dy + dz * dz).sqrt();
 
             // Break the simulation loop if we are within a reasonable proximity radius
-            if distance < 0.2 {
+            if distance < 0.3 {
                 println!(
                     "\n[SIMULATION STOPPED] Target hit! Final distance: {:.2} meters",
                     distance
