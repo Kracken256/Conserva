@@ -9,13 +9,6 @@ impl MeshGenerator for TheMeshGenerator {
     fn generate(&self, state: &MissileState, config: &MissileConfig, mesh: &mut Mesh) {
         let radius = config.geometry.diameter.get::<meter>() / 2.0;
         let body_length = config.geometry.body_length.get::<meter>();
-        let fin_offset = config.geometry.fin_offset_from_nose.get::<meter>();
-        let fin_chord = config.geometry.fin_chord_length.get::<meter>();
-        let span = radius * 3.0; // Reasonable fin stick-out distance
-        let fin_thickness = radius * 0.05_f64.max(0.001); // 5% of radius or minimum 1mm
-
-        let nose_length = config.geometry.nosecone_shape.length().get::<meter>();
-        let nose_shape = &config.geometry.nosecone_shape;
 
         // Fetch dynamic Center of Gravity (CoG) from curve
         let cg = config.geometry.current_cg(state.time);
@@ -30,9 +23,26 @@ impl MeshGenerator for TheMeshGenerator {
         mesh.vertices.clear();
         mesh.indices.clear();
 
-        let pi = std::f64::consts::PI;
+        let cyl_top_idx =
+            self.generate_nose_cone(config, radius, top_z, sectors, nose_stacks, mesh);
+        let cyl_base_idx = self.generate_main_cylinder(radius, base_z, sectors, cyl_top_idx, mesh);
+        self.generate_base_cap(base_z, sectors, cyl_base_idx, mesh);
+        self.generate_fins(config, radius, top_z, mesh);
+    }
+}
 
-        // --- 1. Nose Cone ---
+impl TheMeshGenerator {
+    fn generate_nose_cone(
+        &self,
+        config: &MissileConfig,
+        radius: f64,
+        top_z: f64,
+        sectors: u32,
+        nose_stacks: u32,
+        mesh: &mut Mesh,
+    ) -> u32 {
+        let nose_length = config.geometry.nosecone_shape.length().get::<meter>();
+        let nose_shape = &config.geometry.nosecone_shape;
 
         let tip_idx = mesh.vertices.len() as u32;
         mesh.vertices.push(Vector3::new(0.0, 0.0, top_z));
@@ -44,70 +54,14 @@ impl MeshGenerator for TheMeshGenerator {
             let t = i as f64 / nose_stacks as f64; // 0.0 to 1.0 (1.0 is base of nose)
             let x = nose_length * t; // distance from tip downwards
 
-            let mut current_radius = match nose_shape {
-                NoseconeShape::Conical { .. } => radius * t,
-                NoseconeShape::Elliptical { .. } => {
-                    let d = (nose_length - x) / nose_length;
-                    radius * (1.0 - d * d).max(0.0).sqrt()
-                }
-                NoseconeShape::Parabolic { k_factor, .. } => {
-                    // Parabola with shape factor: y = R * (2(x/L) - K(x/L)^2) / (2 - K)
-                    radius * (2.0 * t - k_factor * t * t) / (2.0 - k_factor)
-                }
-                NoseconeShape::PowerSeries { n, .. } => radius * t.powf(*n),
-                NoseconeShape::Haack { c_factor, .. } => {
-                    let theta = (1.0 - 2.0 * t).acos();
-                    let y =
-                        (theta - (2.0 * theta).sin() / 2.0 + c_factor * theta.sin().powi(3)) / pi;
-                    radius * y.max(0.0).sqrt()
-                }
-                NoseconeShape::Ogive { secant_radius, .. } => {
-                    let rho = if let Some(sr) = secant_radius {
-                        sr.get::<meter>()
-                    } else {
-                        (radius * radius + nose_length * nose_length) / (2.0 * radius)
-                    };
-
-                    let inner = rho * rho - (nose_length - x).powi(2);
-                    if inner > 0.0 {
-                        // Assuming approximate tangency handling for simplicity in secant visualization
-                        inner.sqrt() + radius - rho
-                    } else {
-                        0.0
-                    }
-                }
-            };
-
-            // Generic Spherical Blunting
-            let blunting_r = match nose_shape {
-                NoseconeShape::Conical {
-                    blunting_radius, ..
-                }
-                | NoseconeShape::Ogive {
-                    blunting_radius, ..
-                }
-                | NoseconeShape::Parabolic {
-                    blunting_radius, ..
-                }
-                | NoseconeShape::PowerSeries {
-                    blunting_radius, ..
-                }
-                | NoseconeShape::Haack {
-                    blunting_radius, ..
-                } => blunting_radius.map(|l| l.get::<meter>()),
-                NoseconeShape::Elliptical { .. } => None,
-            };
-
-            if let Some(rn) = blunting_r {
-                if x < rn {
-                    current_radius =
-                        current_radius.max((rn * rn - (rn - x).powi(2)).max(0.0).sqrt());
-                }
-            }
+            let current_radius =
+                Self::calculate_profile_radius(nose_shape, radius, nose_length, x, t);
+            let current_radius = Self::apply_blunting(nose_shape, current_radius, x);
 
             let current_z = top_z - x;
-
             let current_ring_idx = mesh.vertices.len() as u32;
+
+            let pi = std::f64::consts::PI;
             for j in 0..sectors {
                 let angle = 2.0 * pi * (j as f64) / (sectors as f64);
                 mesh.vertices.push(Vector3::new(
@@ -117,42 +71,137 @@ impl MeshGenerator for TheMeshGenerator {
                 ));
             }
 
-            // Stitch to previous ring
-            if prev_ring_size == 1 {
-                // Stitch tip to first ring
-                for j in 0..sectors {
-                    let j_next = (j + 1) % sectors;
-                    mesh.indices.push(tip_idx);
-                    mesh.indices.push(current_ring_idx + j);
-                    mesh.indices.push(current_ring_idx + j_next);
-                }
-            } else {
-                // Stitch ring to ring
-                for j in 0..sectors {
-                    let j_next = (j + 1) % sectors;
-                    let top1 = prev_ring_idx + j;
-                    let top2 = prev_ring_idx + j_next;
-                    let bot1 = current_ring_idx + j;
-                    let bot2 = current_ring_idx + j_next;
-
-                    mesh.indices.push(top1);
-                    mesh.indices.push(bot1);
-                    mesh.indices.push(top2);
-
-                    mesh.indices.push(bot1);
-                    mesh.indices.push(bot2);
-                    mesh.indices.push(top2);
-                }
-            }
+            Self::stitch_nose_ring(
+                mesh,
+                sectors,
+                tip_idx,
+                prev_ring_idx,
+                current_ring_idx,
+                prev_ring_size,
+            );
 
             prev_ring_idx = current_ring_idx;
             prev_ring_size = sectors;
         }
 
-        let cyl_top_idx = prev_ring_idx; // The last ring of the nose is the top of the cylinder
+        prev_ring_idx // The last ring of the nose is the top of the cylinder
+    }
 
-        // --- 2. Main Cylinder ---
+    fn calculate_profile_radius(
+        nose_shape: &NoseconeShape,
+        base_radius: f64,
+        nose_length: f64,
+        x: f64,
+        t: f64,
+    ) -> f64 {
+        let pi = std::f64::consts::PI;
+        match nose_shape {
+            NoseconeShape::Conical { .. } => base_radius * t,
+            NoseconeShape::Elliptical { .. } => {
+                let d = (nose_length - x) / nose_length;
+                base_radius * (1.0 - d * d).max(0.0).sqrt()
+            }
+            NoseconeShape::Parabolic { k_factor, .. } => {
+                base_radius * (2.0 * t - k_factor * t * t) / (2.0 - k_factor)
+            }
+            NoseconeShape::PowerSeries { n, .. } => base_radius * t.powf(*n),
+            NoseconeShape::Haack { c_factor, .. } => {
+                let theta = (1.0 - 2.0 * t).acos();
+                let y = (theta - (2.0 * theta).sin() / 2.0 + c_factor * theta.sin().powi(3)) / pi;
+                base_radius * y.max(0.0).sqrt()
+            }
+            NoseconeShape::Ogive { secant_radius, .. } => {
+                let rho = if let Some(sr) = secant_radius {
+                    sr.get::<meter>()
+                } else {
+                    (base_radius * base_radius + nose_length * nose_length) / (2.0 * base_radius)
+                };
+
+                let inner = rho * rho - (nose_length - x).powi(2);
+                if inner > 0.0 {
+                    inner.sqrt() + base_radius - rho
+                } else {
+                    0.0
+                }
+            }
+        }
+    }
+
+    fn apply_blunting(nose_shape: &NoseconeShape, mut current_radius: f64, x: f64) -> f64 {
+        let blunting_r = match nose_shape {
+            NoseconeShape::Conical {
+                blunting_radius, ..
+            }
+            | NoseconeShape::Ogive {
+                blunting_radius, ..
+            }
+            | NoseconeShape::Parabolic {
+                blunting_radius, ..
+            }
+            | NoseconeShape::PowerSeries {
+                blunting_radius, ..
+            }
+            | NoseconeShape::Haack {
+                blunting_radius, ..
+            } => blunting_radius.map(|l| l.get::<meter>()),
+            NoseconeShape::Elliptical { .. } => None,
+        };
+
+        if let Some(rn) = blunting_r {
+            if x < rn {
+                current_radius = current_radius.max((rn * rn - (rn - x).powi(2)).max(0.0).sqrt());
+            }
+        }
+        current_radius
+    }
+
+    fn stitch_nose_ring(
+        mesh: &mut Mesh,
+        sectors: u32,
+        tip_idx: u32,
+        prev_ring_idx: u32,
+        current_ring_idx: u32,
+        prev_ring_size: u32,
+    ) {
+        if prev_ring_size == 1 {
+            // Stitch tip to first ring
+            for j in 0..sectors {
+                let j_next = (j + 1) % sectors;
+                mesh.indices.push(tip_idx);
+                mesh.indices.push(current_ring_idx + j);
+                mesh.indices.push(current_ring_idx + j_next);
+            }
+        } else {
+            // Stitch ring to ring
+            for j in 0..sectors {
+                let j_next = (j + 1) % sectors;
+                let top1 = prev_ring_idx + j;
+                let top2 = prev_ring_idx + j_next;
+                let bot1 = current_ring_idx + j;
+                let bot2 = current_ring_idx + j_next;
+
+                mesh.indices.push(top1);
+                mesh.indices.push(bot1);
+                mesh.indices.push(top2);
+
+                mesh.indices.push(bot1);
+                mesh.indices.push(bot2);
+                mesh.indices.push(top2);
+            }
+        }
+    }
+
+    fn generate_main_cylinder(
+        &self,
+        radius: f64,
+        base_z: f64,
+        sectors: u32,
+        cyl_top_idx: u32,
+        mesh: &mut Mesh,
+    ) -> u32 {
+        let pi = std::f64::consts::PI;
         let cyl_base_idx = mesh.vertices.len() as u32;
+
         for j in 0..sectors {
             let angle = 2.0 * pi * (j as f64) / (sectors as f64);
             mesh.vertices.push(Vector3::new(
@@ -179,7 +228,10 @@ impl MeshGenerator for TheMeshGenerator {
             mesh.indices.push(top2);
         }
 
-        // --- 3. Base Cap ---
+        cyl_base_idx
+    }
+
+    fn generate_base_cap(&self, base_z: f64, sectors: u32, cyl_base_idx: u32, mesh: &mut Mesh) {
         let base_center_idx = mesh.vertices.len() as u32;
         mesh.vertices.push(Vector3::new(0.0, 0.0, base_z));
         for j in 0..sectors {
@@ -188,8 +240,15 @@ impl MeshGenerator for TheMeshGenerator {
             mesh.indices.push(cyl_base_idx + j_next);
             mesh.indices.push(cyl_base_idx + j);
         }
+    }
 
-        // --- 4. 3D Delta Fins ---
+    fn generate_fins(&self, config: &MissileConfig, radius: f64, top_z: f64, mesh: &mut Mesh) {
+        let pi = std::f64::consts::PI;
+        let fin_offset = config.geometry.fin_offset_from_nose.get::<meter>();
+        let fin_chord = config.geometry.fin_chord_length.get::<meter>();
+        let span = radius * 3.0; // Reasonable fin stick-out distance
+        let fin_thickness = radius * 0.05_f64.max(0.001); // 5% of radius or minimum 1mm
+
         let num_fins = 4;
         let fin_top_z = top_z - fin_offset;
         let fin_bot_z = fin_top_z - fin_chord;
