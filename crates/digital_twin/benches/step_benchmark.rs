@@ -2,8 +2,9 @@ use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use digital_twin::prelude::*;
 use digital_twin_glue::prelude::*;
 use nalgebra::Vector3;
-use uom::si::f64::Length;
+use uom::si::f64::{Length, Time};
 use uom::si::length::meter;
+use uom::si::time::second;
 
 fn bench_step(c: &mut Criterion) {
     let config = get_rocket_design();
@@ -24,7 +25,7 @@ fn bench_step(c: &mut Criterion) {
         b.iter(|| {
             twin.step(black_box(0.01));
             // Just mutate the time back manually to avoid state explosion during bench
-            twin.state.time = Time::new::<uom::si::time::second>(0.0);
+            twin.state.time = Time::new::<second>(0.0);
         })
     });
     group.finish();
