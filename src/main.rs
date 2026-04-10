@@ -159,7 +159,7 @@ fn run_simulation() {
             let distance = (dx * dx + dy * dy + dz * dz).sqrt();
 
             // Break the simulation loop if we are within a reasonable proximity radius
-            if distance < 0.3 {
+            if distance < 1.0 {
                 println!(
                     "\n[SIMULATION STOPPED] Target hit! Final distance: {:.2} meters",
                     distance
@@ -198,7 +198,8 @@ fn main() {
 
     if args.tune {
         let config = get_default_config();
-        tuner::tune_pi(&config, args.dt, args.epochs);
+        let target = Vector3::new(1000.0, 1000.0, 1000.0);
+        tuner::tune_pi(&config, target, args.dt, args.epochs);
     } else {
         run_simulation();
     }
