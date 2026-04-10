@@ -13,7 +13,7 @@ struct Wolf {
     score: f64,
 }
 
-fn evaluate_pid(kp: f64, ki: f64, kd: f64, max_time: f64) -> f64 {
+fn evaluate_pid(kp: f64, ki: f64, kd: f64, max_time: f64, dt: f64) -> f64 {
     let mut config = get_default_config();
     // Apply tuned parameters to both axes for symmetry in this test
     config.controller.pitch_pid_kp = kp;
@@ -33,7 +33,6 @@ fn evaluate_pid(kp: f64, ki: f64, kd: f64, max_time: f64) -> f64 {
     let mut twin = DigitalTwin::new(config, state, Box::new(mesh_generator), Box::new(rocket));
 
     // For evaluate tracking speed & accuracy
-    let dt = 0.01;
     let mut time = 0.0;
 
     let mut itae_accumulator = 0.0;
@@ -72,7 +71,7 @@ fn evaluate_pid(kp: f64, ki: f64, kd: f64, max_time: f64) -> f64 {
         }
 
         // Success condition: within 10m of waypoint
-        if error < 10.0 {
+        if error < 4.0 {
             return itae_accumulator;
         }
     }
@@ -84,12 +83,19 @@ fn evaluate_pid(kp: f64, ki: f64, kd: f64, max_time: f64) -> f64 {
 }
 
 fn main() {
+    let dt_arg = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "0.001".to_string());
+    let dt: f64 = dt_arg
+        .parse()
+        .expect("dt must be a valid strictly positive f64 number");
+
     let epochs = 60;
     let num_wolves = 60;
 
     println!(
-        "Starting Grey Wolf Optimizer (GWO) with {} wolves for {} epochs...",
-        num_wolves, epochs
+        "Starting Grey Wolf Optimizer (GWO) with dt = {}, {} wolves for {} epochs...",
+        dt, num_wolves, epochs
     );
 
     // Search Space Boundaries
@@ -130,7 +136,7 @@ fn main() {
         // 1. Parallel Evaluation
         let scores: Vec<f64> = wolves
             .par_iter()
-            .map(|w| evaluate_pid(w.position.0, w.position.1, w.position.2, 30.0))
+            .map(|w| evaluate_pid(w.position.0, w.position.1, w.position.2, 30.0, dt))
             .collect();
 
         // 2. Update Alpha, Beta, Delta wolves
