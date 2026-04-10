@@ -225,7 +225,13 @@ pub fn tune_pi(base_config: &MissileConfig, target: Vector3<f64>, dt: f64, itera
         });
 
         pb.inc(1);
-        pb.set_message(format!("Best Cost: {:.2}", alpha.score));
+        pb.set_message(format!(
+            "Cost: {:.0} | Stg0[P:{:.2} I:{:.3} D:{:.3}] Stg1[P:{:.2} I:{:.3} D:{:.3}] Stg2[P:{:.2} I:{:.3} D:{:.3}]",
+            alpha.score,
+            alpha.gains[0], alpha.gains[1], alpha.gains[2],
+            alpha.gains[3], alpha.gains[4], alpha.gains[5],
+            alpha.gains[6], alpha.gains[7], alpha.gains[8]
+        ));
     }
 
     pb.finish();
@@ -234,7 +240,7 @@ pub fn tune_pi(base_config: &MissileConfig, target: Vector3<f64>, dt: f64, itera
         "
 ============================================="
     );
-    println!("FINAL GAIN SCHEDULING LOOKUP TABLE (Copy to defaults.rs)");
+    println!("FINAL GAIN SCHEDULING LOOKUP TABLE (Copy to design.rs)");
     println!("=============================================");
 
     println!("        controller: MissileControllerConfig {{");
