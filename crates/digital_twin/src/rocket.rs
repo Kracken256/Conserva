@@ -250,7 +250,7 @@ impl FlightComputer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::defaults::{get_default_config, get_initial_state};
+    use crate::design::{get_default_config, get_initial_state};
     use uom::si::angle::degree;
     use uom::si::angular_velocity::degree_per_second;
     use uom::si::f64::AngularVelocity;
@@ -313,7 +313,6 @@ mod tests {
         let cmd1 = pi.update(5.0, 0.1); // integral becomes 1.0 + 1.0 = 2.0
         assert!((cmd1 - 2.0).abs() < 1e-6, "I control failed");
     }
-
 
     #[test]
     fn current_thrust_interpolates_correctly() {

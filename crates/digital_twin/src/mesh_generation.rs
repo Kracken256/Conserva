@@ -431,7 +431,7 @@ impl TheMeshGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::defaults::{get_default_config, get_initial_state};
+    use crate::design::{get_default_config, get_initial_state};
 
     /// Ensure that the generated mesh treats +Z as the rocket's longitudinal
     /// axis, with the nose tip located at the maximum Z value and centered

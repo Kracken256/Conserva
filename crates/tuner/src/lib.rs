@@ -134,7 +134,7 @@ fn gwo_update(target_gain: f64, current_gain: f64, a: f64, rng: &mut impl Rng) -
 }
 
 pub fn tune_pi(base_config: &MissileConfig, target: Vector3<f64>, dt: f64, iterations: usize) {
-    let num_wolves = 50;
+    let num_wolves = 100;
     let bounds_max = [1.0, 1.0]; // Kp, Ki limits
 
     println!(

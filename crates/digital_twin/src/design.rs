@@ -1,12 +1,12 @@
 use digital_twin_glue::prelude::*;
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
-use uom::si::angle::radian;
-use uom::si::angular_velocity::radian_per_second;
+use uom::si::angle::{degree, radian};
+use uom::si::angular_velocity::{degree_per_second, radian_per_second};
 use uom::si::f64::{Angle, AngularVelocity, Force, Length, Mass, Time, Velocity};
 use uom::si::force::newton;
-use uom::si::length::meter;
+use uom::si::length::{foot, inch, meter};
 use uom::si::mass::kilogram;
-use uom::si::time::second;
+use uom::si::time::{millisecond, second};
 use uom::si::velocity::meter_per_second;
 
 pub fn get_initial_state(config: &MissileConfig) -> MissileState {
@@ -50,33 +50,52 @@ pub fn get_default_config() -> MissileConfig {
                 (Time::new::<second>(10.4), Mass::new::<kilogram>(40.0)),
                 (Time::new::<second>(100.0), Mass::new::<kilogram>(40.0)),
             ],
-            // Normalized inertia tensor (I / m) for a cylinder: L = 1.4m, r = 0.05m
-            // I_xx = I_yy = (3*r^2 + L^2) / 12 = 0.1639
-            // I_zz = (r^2) / 2 = 0.00125
-            inertia_tensor_curve: vec![(
-                Time::new::<second>(0.0),
-                Matrix3::new(0.1639, 0.0, 0.0, 0.0, 0.1639, 0.0, 0.0, 0.0, 0.00125),
-            )],
+            inertia_tensor_curve: vec![
+                (
+                    Time::new::<second>(0.0),
+                    Matrix3::new(30.00, 0.0, 0.0, 0.0, 30.00, 0.0, 0.0, 0.0, 0.180),
+                ),
+                (
+                    Time::new::<second>(2.6),
+                    Matrix3::new(26.71, 0.0, 0.0, 0.0, 26.71, 0.0, 0.0, 0.0, 0.147),
+                ),
+                (
+                    Time::new::<second>(5.2),
+                    Matrix3::new(22.74, 0.0, 0.0, 0.0, 22.74, 0.0, 0.0, 0.0, 0.115),
+                ),
+                (
+                    Time::new::<second>(7.8),
+                    Matrix3::new(17.32, 0.0, 0.0, 0.0, 17.32, 0.0, 0.0, 0.0, 0.082),
+                ),
+                (
+                    Time::new::<second>(10.4),
+                    Matrix3::new(7.70, 0.0, 0.0, 0.0, 7.70, 0.0, 0.0, 0.0, 0.050),
+                ),
+                (
+                    Time::new::<second>(100.0),
+                    Matrix3::new(7.70, 0.0, 0.0, 0.0, 7.70, 0.0, 0.0, 0.0, 0.050),
+                ),
+            ],
         },
         geometry: MissileGeometryConfig {
             nosecone_shape: NoseconeShape::Ogive {
-                length: Length::new::<meter>(0.2), // Default 2x diameter
-                blunting_radius: None,
+                length: Length::new::<inch>(8.0),
+                blunting_radius: Some(Length::new::<inch>(0.1)),
                 secant_radius: None,
             },
-            cylindrical_body_length: Length::new::<meter>(1.4),
-            diameter: Length::new::<meter>(0.1),
+            cylindrical_body_length: Length::new::<foot>(5.0),
+            diameter: Length::new::<inch>(4.0),
             fin_set: FinGeometry {
                 num_fins: 4,
-                offset_from_nose: Length::new::<meter>(1.2),
-                root_chord: Length::new::<meter>(0.2),
-                tip_chord: Length::new::<meter>(0.1),
-                span: Length::new::<meter>(0.2),
-                sweep_length: Length::new::<meter>(0.05),
-                thickness: Length::new::<meter>(0.005),
+                offset_from_nose: Length::new::<foot>(4.5),
+                root_chord: Length::new::<inch>(8.0),
+                tip_chord: Length::new::<inch>(4.0),
+                span: Length::new::<inch>(8.0),
+                sweep_length: Length::new::<inch>(2.0),
+                thickness: Length::new::<inch>(0.2),
                 leading_edge_profile: FinEdgeProfile::Straight,
                 trailing_edge_profile: FinEdgeProfile::Straight,
-                edge_chamfer: Length::new::<meter>(0.0),
+                edge_chamfer: Length::new::<inch>(0.078),
             },
             cg_curve: vec![
                 (
@@ -84,7 +103,31 @@ pub fn get_default_config() -> MissileConfig {
                     Vector3::new(
                         Length::new::<meter>(0.0),
                         Length::new::<meter>(0.0),
-                        Length::new::<meter>(-0.25),
+                        Length::new::<meter>(-0.1000),
+                    ),
+                ),
+                (
+                    Time::new::<second>(2.6),
+                    Vector3::new(
+                        Length::new::<meter>(0.0),
+                        Length::new::<meter>(0.0),
+                        Length::new::<meter>(-0.0565),
+                    ),
+                ),
+                (
+                    Time::new::<second>(5.2),
+                    Vector3::new(
+                        Length::new::<meter>(0.0),
+                        Length::new::<meter>(0.0),
+                        Length::new::<meter>(0.0111),
+                    ),
+                ),
+                (
+                    Time::new::<second>(7.8),
+                    Vector3::new(
+                        Length::new::<meter>(0.0),
+                        Length::new::<meter>(0.0),
+                        Length::new::<meter>(0.1308),
                     ),
                 ),
                 (
@@ -92,7 +135,7 @@ pub fn get_default_config() -> MissileConfig {
                     Vector3::new(
                         Length::new::<meter>(0.0),
                         Length::new::<meter>(0.0),
-                        Length::new::<meter>(0.0),
+                        Length::new::<meter>(0.4000),
                     ),
                 ),
                 (
@@ -100,16 +143,16 @@ pub fn get_default_config() -> MissileConfig {
                     Vector3::new(
                         Length::new::<meter>(0.0),
                         Length::new::<meter>(0.0),
-                        Length::new::<meter>(0.0),
+                        Length::new::<meter>(0.4000),
                     ),
                 ),
             ],
         },
         controller: MissileControllerConfig {
-            pitch_pi_kp: 0.323292,
-            pitch_pi_ki: 0.172613,
-            yaw_pi_kp: 0.323292,
-            yaw_pi_ki: 0.172613,
+            pitch_pi_kp: 0.642419,
+            pitch_pi_ki: 0.000000,
+            yaw_pi_kp: 0.642419,
+            yaw_pi_ki: 0.0,
         },
         engine: MissileEngineConfig {
             motor_impulse_curve: vec![
@@ -118,9 +161,9 @@ pub fn get_default_config() -> MissileConfig {
                 (Time::new::<second>(10.2), Force::new::<newton>(17800.0)),
                 (Time::new::<second>(10.4), Force::new::<newton>(0.0)),
             ],
-            max_tvc_angle: Angle::new::<radian>(20.0_f64.to_radians()),
-            tvc_slew_rate: AngularVelocity::new::<radian_per_second>(60.0_f64.to_radians()),
-            tvc_activation_delay: Time::new::<second>(0.05), // 50ms PT1 delay constant
+            max_tvc_angle: Angle::new::<degree>(20.0),
+            tvc_slew_rate: AngularVelocity::new::<degree_per_second>(60.0),
+            tvc_activation_delay: Time::new::<millisecond>(50.0),
         },
     }
 }
