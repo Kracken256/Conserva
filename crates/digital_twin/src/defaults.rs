@@ -58,6 +58,11 @@ pub fn get_default_config() -> MissileConfig {
             )],
         },
         geometry: MissileGeometryConfig {
+            nosecone_shape: NoseconeShape::Ogive {
+                length: Length::new::<meter>(0.2), // Default 2x diameter
+                blunting_radius: None,
+                secant_radius: None,
+            },
             body_length: Length::new::<meter>(1.4),
             diameter: Length::new::<meter>(0.1),
             fin_offset_from_nose: Length::new::<meter>(1.2),

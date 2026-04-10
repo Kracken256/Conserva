@@ -10,7 +10,7 @@ pub mod prelude {
     pub use crate::digital_twin::DigitalTwin;
     pub use crate::geometry::config::{
         MissileConfig, MissileControllerConfig, MissileEngineConfig, MissileGeometryConfig,
-        MissileMassConfig,
+        MissileMassConfig, NoseconeShape,
     };
     pub use crate::geometry::mesh::{Mesh, MeshGenerator};
     pub use crate::physics::solver::{AeroSolver, SolverOutput, lookup_atmosphere};

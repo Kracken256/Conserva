@@ -14,7 +14,8 @@ impl MeshGenerator for TheMeshGenerator {
         let span = radius * 3.0; // Reasonable fin stick-out distance
         let fin_thickness = radius * 0.05_f64.max(0.001); // 5% of radius or minimum 1mm
 
-        let nose_length = config.geometry.diameter.get::<meter>() * 2.0; // Typical rocket nose
+        let nose_length = config.geometry.nosecone_shape.length().get::<meter>();
+        let nose_shape = &config.geometry.nosecone_shape;
 
         // Fetch dynamic Center of Gravity (CoG) from curve
         let cg = config.geometry.current_cg(state.time);
@@ -24,16 +25,14 @@ impl MeshGenerator for TheMeshGenerator {
         let base_z = -body_length / 2.0 - cg.z.get::<meter>();
 
         let sectors = 64; // High fidelity cylinder
-        let nose_stacks = 32; // High fidelity ogive nose
+        let nose_stacks = 32; // High fidelity nose
 
         mesh.vertices.clear();
         mesh.indices.clear();
 
         let pi = std::f64::consts::PI;
 
-        // --- 1. Nose Cone (Tangent Ogive) ---
-        // R = (r^2 + L^2) / (2r)
-        let ogive_radius = (radius * radius + nose_length * nose_length) / (2.0 * radius);
+        // --- 1. Nose Cone ---
 
         let tip_idx = mesh.vertices.len() as u32;
         mesh.vertices.push(Vector3::new(0.0, 0.0, top_z));
@@ -43,19 +42,70 @@ impl MeshGenerator for TheMeshGenerator {
 
         for i in 1..=nose_stacks {
             let t = i as f64 / nose_stacks as f64; // 0.0 to 1.0 (1.0 is base of nose)
-            let x_ogive = nose_length * t; // distance from tip downwards
-            // y = sqrt(R^2 - (L - x)^2) + r - R
-            let y_ogive = {
-                let inner = ogive_radius * ogive_radius - (nose_length - x_ogive).powi(2);
-                if inner > 0.0 {
-                    inner.sqrt() + radius - ogive_radius
-                } else {
-                    0.0 // Fail safe
+            let x = nose_length * t; // distance from tip downwards
+
+            let mut current_radius = match nose_shape {
+                NoseconeShape::Conical { .. } => radius * t,
+                NoseconeShape::Elliptical { .. } => {
+                    let d = (nose_length - x) / nose_length;
+                    radius * (1.0 - d * d).max(0.0).sqrt()
+                }
+                NoseconeShape::Parabolic { k_factor, .. } => {
+                    // Parabola with shape factor: y = R * (2(x/L) - K(x/L)^2) / (2 - K)
+                    radius * (2.0 * t - k_factor * t * t) / (2.0 - k_factor)
+                }
+                NoseconeShape::PowerSeries { n, .. } => radius * t.powf(*n),
+                NoseconeShape::Haack { c_factor, .. } => {
+                    let theta = (1.0 - 2.0 * t).acos();
+                    let y =
+                        (theta - (2.0 * theta).sin() / 2.0 + c_factor * theta.sin().powi(3)) / pi;
+                    radius * y.max(0.0).sqrt()
+                }
+                NoseconeShape::Ogive { secant_radius, .. } => {
+                    let rho = if let Some(sr) = secant_radius {
+                        sr.get::<meter>()
+                    } else {
+                        (radius * radius + nose_length * nose_length) / (2.0 * radius)
+                    };
+
+                    let inner = rho * rho - (nose_length - x).powi(2);
+                    if inner > 0.0 {
+                        // Assuming approximate tangency handling for simplicity in secant visualization
+                        inner.sqrt() + radius - rho
+                    } else {
+                        0.0
+                    }
                 }
             };
 
-            let current_z = top_z - x_ogive;
-            let current_radius = y_ogive;
+            // Generic Spherical Blunting
+            let blunting_r = match nose_shape {
+                NoseconeShape::Conical {
+                    blunting_radius, ..
+                }
+                | NoseconeShape::Ogive {
+                    blunting_radius, ..
+                }
+                | NoseconeShape::Parabolic {
+                    blunting_radius, ..
+                }
+                | NoseconeShape::PowerSeries {
+                    blunting_radius, ..
+                }
+                | NoseconeShape::Haack {
+                    blunting_radius, ..
+                } => blunting_radius.map(|l| l.get::<meter>()),
+                NoseconeShape::Elliptical { .. } => None,
+            };
+
+            if let Some(rn) = blunting_r {
+                if x < rn {
+                    current_radius =
+                        current_radius.max((rn * rn - (rn - x).powi(2)).max(0.0).sqrt());
+                }
+            }
+
+            let current_z = top_z - x;
 
             let current_ring_idx = mesh.vertices.len() as u32;
             for j in 0..sectors {

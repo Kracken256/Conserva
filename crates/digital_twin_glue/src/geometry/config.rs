@@ -4,7 +4,62 @@ use uom::si::f64::{Angle, AngularVelocity, Force, Length, Mass, Time};
 use uom::si::time::second;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "shape", rename_all = "snake_case")]
+pub enum NoseconeShape {
+    Conical {
+        length: Length,
+        /// Radius of spherical blunting at the tip. None for infinitely sharp.
+        blunting_radius: Option<Length>,
+    },
+    Ogive {
+        length: Length,
+        /// Radius of spherical blunting at the tip.
+        blunting_radius: Option<Length>,
+        /// If specified, generates a Secant Ogive with this profile curve radius. If None, computes a Tangent Ogive.
+        secant_radius: Option<Length>,
+    },
+    Elliptical {
+        length: Length,
+    }, // Already blunt
+    Parabolic {
+        length: Length,
+        /// Shape factor K. 0.0 is a cone, 1.0 is a full parabola.
+        k_factor: f64,
+        blunting_radius: Option<Length>,
+    },
+    PowerSeries {
+        length: Length,
+        /// Power factor n. Shape curve: y = R * (x/L)^n
+        n: f64,
+        blunting_radius: Option<Length>,
+    },
+    Haack {
+        length: Length,
+        /// C multiplier for Haack series. 0.0 for LD-Haack (Von Karman), 1.0/3.0 for LV-Haack.
+        c_factor: f64,
+        blunting_radius: Option<Length>,
+    },
+}
+
+impl NoseconeShape {
+    /// Gets the structural length of the nosecone
+    pub fn length(&self) -> Length {
+        match self {
+            Self::Conical { length, .. } => *length,
+            Self::Ogive { length, .. } => *length,
+            Self::Elliptical { length, .. } => *length,
+            Self::Parabolic { length, .. } => *length,
+            Self::PowerSeries { length, .. } => *length,
+            Self::Haack { length, .. } => *length,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MissileGeometryConfig {
+    /// The physical shape type and parameters describing the nosecone contour and length. Different
+    /// geometries (Ogive, Conical, Parabolic) possess distinct aerodynamic drag profiles.
+    pub nosecone_shape: NoseconeShape,
     /// The total length of the main cylindrical body of the missile. It defines the primary
     /// aerodynamic acting surface and total volume. This measurement actively dictates the
     /// dimensional space available for the payload, electronics, and propellant.
@@ -290,6 +345,11 @@ mod tests {
 
     fn default_geom() -> MissileGeometryConfig {
         MissileGeometryConfig {
+            nosecone_shape: NoseconeShape::Ogive {
+                length: Length::new::<meter>(0.2),
+                blunting_radius: None,
+                secant_radius: None,
+            },
             body_length: Length::new::<meter>(1.0),
             diameter: Length::new::<meter>(0.1),
             fin_offset_from_nose: Length::new::<meter>(0.9),
