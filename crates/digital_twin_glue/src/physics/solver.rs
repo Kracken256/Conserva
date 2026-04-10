@@ -7,61 +7,71 @@ pub struct SolverOutput {
 
 use crate::prelude::{Mesh, MissileState};
 
-/// A simplified standard atmosphere table.
-/// Columns: (Altitude [m], Density [kg/m^3], Speed of Sound [m/s], Dynamic Viscosity [kg/(m·s)])
-/// This table is used to estimate ambient flight conditions at a given altitude.
-const ATMOSPHERE_TABLE: &[(f64, f64, f64, f64)] = &[
-    (0.0, 1.225, 340.29, 1.789e-5),
-    (2000.0, 1.007, 332.53, 1.726e-5),
-    (4000.0, 0.819, 324.59, 1.661e-5),
-    (6000.0, 0.660, 316.45, 1.595e-5),
-    (8000.0, 0.525, 308.11, 1.527e-5),
-    (10000.0, 0.413, 299.53, 1.458e-5),
-    (15000.0, 0.194, 295.07, 1.422e-5),
-    (20000.0, 0.088, 295.07, 1.422e-5),
-    (30000.0, 0.018, 301.71, 1.475e-5),
-    (40000.0, 0.004, 317.19, 1.601e-5),
-    (50000.0, 0.001, 329.80, 1.704e-5),
-    (60000.0, 0.0003, 314.66, 1.580e-5),
-    (80000.0, 0.00001, 282.20, 1.320e-5),
+
+/// Core parameters delineating the distinct atmospheric boundary layers utilized
+/// by the US Standard Atmosphere (ISA) profile.
+/// Columns: (Base Altitude [m], Base Temperature [K], Lapse Rate [K/m], Base Pressure [Pa])
+const ISA_LAYERS: &[(f64, f64, f64, f64)] = &[
+    (0.0, 288.15, -0.0065, 101325.0),
+    (11000.0, 216.65, 0.0, 22632.1),
+    (20000.0, 216.65, 0.001, 5474.89),
+    (32000.0, 228.65, 0.0028, 868.019),
+    (47000.0, 270.65, 0.0, 110.906),
+    (51000.0, 270.65, -0.0028, 66.9389),
+    (71000.0, 214.65, -0.002, 3.95642),
+    (86000.0, 186.87, 0.0, 0.3016),
 ];
 
-/// Linearly interpolates the atmospheric properties based on altitude.
+/// Computes the ambient atmospheric properties utilizing the International Standard Atmosphere (ISA) model.
+/// Provides continuous profiles for thermodynamic variables integrating standard thermocline layers mapping smoothly
+/// up to the 86km mesopause limits.
 ///
 /// # Arguments
 /// * `altitude` - The current altitude of the body in meters above sea level.
 ///
 /// # Returns
-/// A tuple containing `(density, speed_of_sound, dynamic_viscosity)`.
+/// A tuple containing `(density [kg/m^3], speed_of_sound [m/s], dynamic_viscosity [kg/(m·s)])`.
 pub fn lookup_atmosphere(altitude: f64) -> (f64, f64, f64) {
-    // Above 100km (Karman line), we assume negligible atmosphere.
     if altitude > 100_000.0 {
+        // Space approximation bounds
         return (1e-12, 280.0, 1.3e-5);
     }
 
-    // Clamp altitude to 0 to prevent issues below sea level.
-    let alt = altitude.max(0.0);
-
-    for i in 0..ATMOSPHERE_TABLE.len() - 1 {
-        let p0 = ATMOSPHERE_TABLE[i];
-        let p1 = ATMOSPHERE_TABLE[i + 1];
-
-        // Perform linear interpolation between the two bracketing altitude points
-        if alt <= p1.0 {
-            let t = (alt - p0.0) / (p1.0 - p0.0);
-            return (
-                p0.1 + t * (p1.1 - p0.1),
-                p0.2 + t * (p1.2 - p0.2),
-                p0.3 + t * (p1.3 - p0.3),
-            );
+    let alt = altitude.max(0.0).min(86000.0);
+    
+    let mut layer = 0;
+    for i in 1..ISA_LAYERS.len() {
+        if alt < ISA_LAYERS[i].0 {
+            break;
         }
+        layer = i;
     }
 
-    // If we exceed the highest table value but are Below 100km, return the top-most row's properties
-    let last = ATMOSPHERE_TABLE.last().unwrap();
-    (last.1, last.2, last.3)
-}
+    let (h_b, t_b, l_b, p_b) = ISA_LAYERS[layer];
 
+    let g0 = 9.80665;
+    let m_air = 0.0289644;
+    let r_gas = 8.3144598;
+    let gamma = 1.4;
+
+    let t = t_b + l_b * (alt - h_b);
+    let p = if l_b.abs() > 1e-10 {
+        p_b * (t_b / t).powf((g0 * m_air) / (r_gas * l_b))
+    } else {
+        p_b * (-g0 * m_air * (alt - h_b) / (r_gas * t_b)).exp()
+    };
+
+    let density = (p * m_air) / (r_gas * t);
+    let speed_of_sound = (gamma * (r_gas / m_air) * t).sqrt();
+
+    // Sutherland's law for dynamic viscosity
+    let mu0 = 1.716e-5;
+    let t0 = 273.15;
+    let c = 110.4;
+    let dynamic_viscosity = mu0 * ((t0 + c) / (t + c)) * (t / t0).powf(1.5);
+
+    (density, speed_of_sound, dynamic_viscosity)
+}
 /// The main aerodynamic solver struct, implementing various Mach-dependent flight regimes.
 #[derive(Debug, Clone, Default)]
 pub struct AeroSolver {}

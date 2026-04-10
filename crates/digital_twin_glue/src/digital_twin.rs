@@ -19,7 +19,6 @@ pub struct DigitalTwin {
     pub solver: AeroSolver,
     pub mesh_generator: Box<dyn MeshGenerator>,
     pub current_mesh: Mesh,
-    pub wind_velocity: Vector3<Velocity>,
     rk4: integ::rk4::Rk4,
 }
 
@@ -37,7 +36,6 @@ impl DigitalTwin {
             mesh_generator,
             rocket,
             current_mesh: Mesh::default(),
-            wind_velocity: Vector3::zeros(),
             rk4: integ::rk4::Rk4 {},
         }
     }
@@ -58,6 +56,7 @@ impl DigitalTwin {
         let (air_density, speed_of_sound, dyn_viscosity) = lookup_atmosphere(altitude);
 
         // 2. Define the "System Dynamics"
+        let t_sec = self.state.time.value;
         let mut sub_state = self.state.clone();
         let physics_engine =
             |v: Vector3<f64>, w: Vector3<f64>, q: Quaternion<f64>, p: Vector3<f64>| {
@@ -67,9 +66,21 @@ impl DigitalTwin {
                 sub_state.angular_velocity = w.map(AngularVelocity::new::<radian_per_second>);
                 sub_state.orientation = UnitQuaternion::from_quaternion(q);
 
+                let turb_factor = self.config.environment.turbulence_intensity;
+                let gust_x = turb_factor * ((t_sec * 2.1).sin() + 0.5 * (t_sec * 5.3 + 1.2).sin());
+                let gust_y =
+                    turb_factor * ((t_sec * 1.7 + 2.0).sin() + 0.5 * (t_sec * 4.1 + 0.5).sin());
+                let gust_z = turb_factor * ((t_sec * 3.3 + 1.0).sin() * 0.3);
+
+                let base_wind = self
+                    .config
+                    .environment
+                    .wind_velocity
+                    .map(|v| v.get::<meter_per_second>());
+                let total_wind_f64 = base_wind + Vector3::new(gust_x, gust_y, gust_z);
+
                 // Convert world-frame wind to body-frame and compute relative airspeed
-                let wind_body_f64 = sub_state.orientation.conjugate()
-                    * self.wind_velocity.map(|v| v.get::<meter_per_second>());
+                let wind_body_f64 = sub_state.orientation.conjugate() * total_wind_f64;
                 let wind_body_vel = wind_body_f64.map(Velocity::new::<meter_per_second>);
                 sub_state.body_velocity -= wind_body_vel;
 

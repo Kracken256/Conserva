@@ -1,6 +1,6 @@
 use nalgebra::{Matrix3, Vector3};
 use serde::{Deserialize, Serialize};
-use uom::si::f64::{Angle, AngularVelocity, Force, Length, Mass, Time};
+use uom::si::f64::{Angle, AngularVelocity, Force, Length, Mass, Time, Velocity};
 use uom::si::time::second;
 
 /// Defines the overarching geometric archetype of the missile's forwardmost aerodynamic surface.
@@ -305,6 +305,37 @@ pub struct MissileMassConfig {
     pub inertia_tensor_curve: Vec<(Time, Matrix3<f64>)>,
 }
 
+/// Delineates the atmospheric boundary conditions and weather parameters.
+/// It configures the baseline ambient wind vectors operating across the planetary body.
+/// Additionally, it parameterizes advanced turbulence profiles utilizing standardized models like Dryden formulas.
+/// Collectively, these parameters rigidly dictate aerodynamic density adjustments and unsteady air behaviors.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EnvironmentalConfig {
+    /// Baseline continuous three-dimensional flow vector dictating total wind behavior.
+    /// It effectively acts as a persistent kinematic translation directly shifting observed global airspeed variables.
+    /// This metric strictly enforces gross drift constraints over extended integration distances.
+    pub wind_velocity: Vector3<Velocity>,
+
+    /// A multiplicative scaling factor applied atop internal turbulent noise layers.
+    /// Values above zero spawn chaotic high-frequency flutter reflecting violent, unresolved thermals tracking past.
+    /// Setting this rigidly limits randomized flight path deviations strictly required for realistic tuning.
+    pub turbulence_intensity: f64,
+}
+
+impl Default for EnvironmentalConfig {
+    fn default() -> Self {
+        use uom::si::velocity::meter_per_second;
+        Self {
+            wind_velocity: Vector3::new(
+                Velocity::new::<meter_per_second>(0.0),
+                Velocity::new::<meter_per_second>(0.0),
+                Velocity::new::<meter_per_second>(0.0),
+            ),
+            turbulence_intensity: 0.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MissileConfig {
     /// Gathers all defining structural boundary measurements obligatory for
@@ -335,6 +366,12 @@ pub struct MissileConfig {
     /// tensors bundled strictly enforce handling rigidity constraints applied against the physics
     /// engine torques.
     pub mass: MissileMassConfig,
+
+    /// Maps the external environmental and meteorological constraints acting directly on the system.
+    /// Parameters nested here specify dynamic properties capturing turbulent thermal profiles and prevailing wind drift.
+    /// Thus, physical aerodynamic iterations synchronize completely with shifting realistic air properties.
+    #[serde(default)]
+    pub environment: EnvironmentalConfig,
 }
 
 impl NoseconeShape {

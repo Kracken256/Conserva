@@ -41,7 +41,8 @@ pub fn get_initial_state(config: &MissileConfig) -> MissileState {
 
 pub fn get_default_config() -> MissileConfig {
     MissileConfig {
-        mass: MissileMassConfig {
+            environment: EnvironmentalConfig::default(),
+            mass: MissileMassConfig {
             dry_mass: Mass::new::<kilogram>(40.0),
             wet_mass: Mass::new::<kilogram>(140.0),
             mass_curve: vec![
