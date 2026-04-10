@@ -1,12 +1,10 @@
+use crate::prelude::{Mesh, MissileState};
 use nalgebra::Vector3;
 
 pub struct SolverOutput {
     pub force: Vector3<f64>,
     pub torque: Vector3<f64>,
 }
-
-use crate::prelude::{Mesh, MissileState};
-
 
 /// Core parameters delineating the distinct atmospheric boundary layers utilized
 /// by the US Standard Atmosphere (ISA) profile.
@@ -38,7 +36,7 @@ pub fn lookup_atmosphere(altitude: f64) -> (f64, f64, f64) {
     }
 
     let alt = altitude.max(0.0).min(86000.0);
-    
+
     let mut layer = 0;
     for i in 1..ISA_LAYERS.len() {
         if alt < ISA_LAYERS[i].0 {
@@ -54,7 +52,7 @@ pub fn lookup_atmosphere(altitude: f64) -> (f64, f64, f64) {
     let r_gas = 8.3144598;
     let gamma = 1.4;
 
-    let t = t_b + l_b * (alt - h_b);
+    let t = (t_b + l_b * (alt - h_b)).max(1.0);
     let p = if l_b.abs() > 1e-10 {
         p_b * (t_b / t).powf((g0 * m_air) / (r_gas * l_b))
     } else {
@@ -107,8 +105,6 @@ impl AeroSolver {
         if freestream_mach < 0.8 {
             // == Subsonic Regime (Mach < 0.8) ==
             // Apply the Prandtl-Glauert compressibility correction rule.
-            let pg_beta = (1.0 - freestream_mach * freestream_mach).sqrt().max(0.4);
-
             Self::integrate_mesh(
                 mesh,
                 cm_local,
@@ -119,21 +115,22 @@ impl AeroSolver {
                 dyn_viscosity,
                 length_ref,
                 freestream_mach,
-                // Resulting C_p on the windward side
-                |cos_theta, _| (cos_theta * 2.0) / f64x8::splat(pg_beta),
+                // Resulting C_p on the windward side evaluated using local mach
+                |cos_theta, local_mach| {
+                    let pg_beta = (f64x8::splat(1.0) - (local_mach * local_mach))
+                        .max(f64x8::splat(0.16))
+                        .sqrt();
+                    (cos_theta * f64x8::splat(2.0)) / pg_beta
+                },
+                |cos_theta, local_mach| {
+                    let pg_beta = (1.0 - local_mach * local_mach).max(0.16).sqrt();
+                    (cos_theta * 2.0) / pg_beta
+                },
             )
         } else if freestream_mach < 1.2 {
             // == Transonic Regime (0.8 <= Mach < 1.2) ==
             // Linearly blend between subsonic compressibility and supersonic scaling
             // to avoid discontinuities as it breaks through the sound barrier.
-            let mach_blend = (freestream_mach - 0.8) / 0.4;
-
-            // Anchor values evaluated exactly at Mach 0.8 and Mach 1.2 boundaries
-            let cp_sub_coef = 2.0 / (1.0 - 0.64_f64).sqrt(); // Mach 0.8
-            let cp_sup_coef = 2.0 / (1.44_f64 - 1.0).sqrt(); // Mach 1.2
-
-            let cp_blend = cp_sub_coef * (1.0 - mach_blend) + cp_sup_coef * mach_blend;
-
             Self::integrate_mesh(
                 mesh,
                 cm_local,
@@ -144,13 +141,25 @@ impl AeroSolver {
                 dyn_viscosity,
                 length_ref,
                 freestream_mach,
-                |cos_theta, _| cos_theta * f64x8::splat(cp_blend),
+                |cos_theta, local_mach| {
+                    let mach_blend = (local_mach - f64x8::splat(0.8)) / f64x8::splat(0.4);
+                    let cp_sub_coef = f64x8::splat(2.0 / (1.0 - 0.8_f64.powi(2)).sqrt());
+                    let cp_sup_coef = f64x8::splat(2.0 / (1.2_f64.powi(2) - 1.0).sqrt());
+                    let cp_blend =
+                        cp_sub_coef * (f64x8::splat(1.0) - mach_blend) + cp_sup_coef * mach_blend;
+                    cos_theta * cp_blend
+                },
+                |cos_theta, local_mach| {
+                    let mach_blend = (local_mach - 0.8) / 0.4;
+                    let cp_sub_coef = 2.0 / (1.0 - 0.8_f64.powi(2)).sqrt();
+                    let cp_sup_coef = 2.0 / (1.2_f64.powi(2) - 1.0).sqrt();
+                    let cp_blend = cp_sub_coef * (1.0 - mach_blend) + cp_sup_coef * mach_blend;
+                    cos_theta * cp_blend
+                },
             )
         } else if freestream_mach < 5.0 {
             // == Supersonic Regime (1.2 <= Mach < 5.0) ==
             // Employs Ackeret's Linear Supersonic Theory for estimating the pressure coefficient.
-            let beta = (freestream_mach * freestream_mach - 1.0).sqrt();
-
             Self::integrate_mesh(
                 mesh,
                 cm_local,
@@ -161,17 +170,22 @@ impl AeroSolver {
                 dyn_viscosity,
                 length_ref,
                 freestream_mach,
-                |cos_theta, _| (cos_theta * 2.0) / f64x8::splat(beta),
+                |cos_theta, local_mach| {
+                    let beta = (local_mach * local_mach - f64x8::splat(1.0))
+                        .max(f64x8::splat(0.0))
+                        .sqrt();
+                    let safe_beta = beta.max(f64x8::splat(0.01));
+                    (cos_theta * f64x8::splat(2.0)) / safe_beta
+                },
+                |cos_theta, local_mach| {
+                    let beta = (local_mach * local_mach - 1.0).max(0.0).sqrt().max(0.01);
+                    (cos_theta * 2.0) / beta
+                },
             )
         } else {
             // == Hypersonic Regime (Mach >= 5.0) ==
             // Combines Ackeret Theory (at lower limits) with Newtonian Impact Theory (high limits).
             // This models inelastic flow collisions commonly seen at extreme speeds.
-            let blend = ((freestream_mach - 5.0) / 2.0).clamp(0.0, 1.0);
-
-            // Fixed reference boundary evaluated at Mach 5
-            let beta_5 = (25.0_f64 - 1.0).sqrt();
-
             Self::integrate_mesh(
                 mesh,
                 cm_local,
@@ -182,11 +196,23 @@ impl AeroSolver {
                 dyn_viscosity,
                 length_ref,
                 freestream_mach,
-                move |cos_theta, _| {
-                    // Newtonian impact approximation: 2 * sin^2(theta_flow)
+                |cos_theta, local_mach| {
+                    // Safe clamp interpolation
+                    let upper = local_mach.min(f64x8::splat(7.0));
+                    let blend =
+                        ((upper - f64x8::splat(5.0)) / f64x8::splat(2.0)).max(f64x8::splat(0.0));
+
+                    let beta_5 = f64x8::splat((25.0_f64 - 1.0).sqrt());
                     let cp_newtonian = cos_theta * cos_theta * f64x8::splat(2.0);
-                    let cp_ackeret = (cos_theta * 2.0) / f64x8::splat(beta_5);
-                    cp_ackeret * f64x8::splat(1.0 - blend) + cp_newtonian * f64x8::splat(blend)
+                    let cp_ackeret = (cos_theta * f64x8::splat(2.0)) / beta_5;
+                    cp_ackeret * (f64x8::splat(1.0) - blend) + cp_newtonian * blend
+                },
+                |cos_theta, local_mach| {
+                    let blend = ((local_mach - 5.0) / 2.0).clamp(0.0, 1.0);
+                    let beta_5 = (25.0_f64 - 1.0).sqrt();
+                    let cp_newtonian = cos_theta * cos_theta * 2.0;
+                    let cp_ackeret = (cos_theta * 2.0) / beta_5;
+                    cp_ackeret * (1.0 - blend) + cp_newtonian * blend
                 },
             )
         }
@@ -195,19 +221,17 @@ impl AeroSolver {
 
 /// Computes a fast approximation of x^(-0.2) which is used for the
 /// 1/5th power law of turbulent boundary layer skin friction.
-/// Uses the magic bit-level constant for an inverse 5th root,
-/// followed by one Newton-Raphson iteration.
+/// Uses a 64-bit magic constant adapted for inverse 5th root,
+/// scaled for Reynolds number calculations.
 #[inline(always)]
-fn fast_inv_fifth_root(x: f32) -> f32 {
+fn fast_inv_fifth_root(x: f64) -> f64 {
     let i = x.to_bits();
-    // Magic constant for inverse 5th root: 0x4C32DDF8
-    let j = 0x4C32DDF8 - i / 5;
-    let y = f32::from_bits(j);
-
-    // One iteration of Newton-Raphson: y = y * (1.2 - 0.2 * x * y^5)
+    let j = 0x4cb8c612284ba400_u64 - i / 5;
+    let y = f64::from_bits(j);
     let y2 = y * y;
     let y4 = y2 * y2;
     let y5 = y4 * y;
+    // Single Newton-Raphson iteration
     y * (1.2 - 0.2 * x * y5)
 }
 
@@ -231,7 +255,7 @@ impl AeroSolver {
     /// * `calc_windward_cp` - A callback closure defining how to compute the localized
     ///   pressure coefficient (`C_p`) given the specific flow regime bounds.
     #[inline(always)]
-    fn integrate_mesh<F>(
+    fn integrate_mesh<F, FS>(
         mesh: &Mesh,
         cm: Vector3<f64>,
         v_inf: Vector3<f64>,
@@ -242,9 +266,11 @@ impl AeroSolver {
         length_ref: f64,
         freestream_mach: f64,
         calc_windward_cp: F,
+        calc_windward_cp_scalar: FS,
     ) -> SolverOutput
     where
         F: Fn(f64x8, f64x8) -> f64x8,
+        FS: Fn(f64, f64) -> f64,
     {
         let mut total_force = Vector3::zeros();
         let mut total_torque = Vector3::zeros();
@@ -429,24 +455,26 @@ impl AeroSolver {
             let turbulent_mask = reynolds.simd_gt(f64x8::splat(1e5));
 
             let safe_reynolds = reynolds.max(f64x8::splat(1e-5));
+            let knudsen = f64x8::splat(1.482) * local_mach / safe_reynolds;
+            let slip_correction = f64x8::splat(1.0) / (f64x8::splat(1.0) + knudsen);
 
             // Calculate turbulent skin friction C_f using a 1/5th power law.
             // Since `wide` lacks a vectorized `powf` for `f64x8`, we fall back to a scalar array computation.
             // x^-0.2 is mathematically equivalent to 1.0 / x^0.2.
             let safe_rey_arr = safe_reynolds.to_array();
             let cp_turb_arr = [
-                0.074 * fast_inv_fifth_root(safe_rey_arr[0] as f32) as f64,
-                0.074 * fast_inv_fifth_root(safe_rey_arr[1] as f32) as f64,
-                0.074 * fast_inv_fifth_root(safe_rey_arr[2] as f32) as f64,
-                0.074 * fast_inv_fifth_root(safe_rey_arr[3] as f32) as f64,
-                0.074 * fast_inv_fifth_root(safe_rey_arr[4] as f32) as f64,
-                0.074 * fast_inv_fifth_root(safe_rey_arr[5] as f32) as f64,
-                0.074 * fast_inv_fifth_root(safe_rey_arr[6] as f32) as f64,
-                0.074 * fast_inv_fifth_root(safe_rey_arr[7] as f32) as f64,
+                0.074 * fast_inv_fifth_root(safe_rey_arr[0]),
+                0.074 * fast_inv_fifth_root(safe_rey_arr[1]),
+                0.074 * fast_inv_fifth_root(safe_rey_arr[2]),
+                0.074 * fast_inv_fifth_root(safe_rey_arr[3]),
+                0.074 * fast_inv_fifth_root(safe_rey_arr[4]),
+                0.074 * fast_inv_fifth_root(safe_rey_arr[5]),
+                0.074 * fast_inv_fifth_root(safe_rey_arr[6]),
+                0.074 * fast_inv_fifth_root(safe_rey_arr[7]),
             ];
             let cp_turb = f64x8::new(cp_turb_arr);
 
-            let c_f = turbulent_mask.blend(cp_turb, f64x8::splat(0.002));
+            let c_f = turbulent_mask.blend(cp_turb, f64x8::splat(0.002)) * slip_correction;
 
             let q = f64x8::splat(0.5) * air_density_splat * safe_v_mag * safe_v_mag;
 
@@ -577,17 +605,19 @@ impl AeroSolver {
             let d = -loc_v / vm;
             let cdt = n_scalar.dot(&d);
 
-            // Broadcast scalar remainder variables into f64x8 vectors to satisfy the `calc_windward_cp` signature.
-            let cw_arr = calc_windward_cp(f64x8::splat(cdt.abs()), f64x8::splat(lmach)).to_array();
-            let cp_w = cw_arr[0];
+            // Directly evaluate the scalar windward cp without SIMD splatting overhead.
+            let cp_w = calc_windward_cp_scalar(cdt.abs(), lmach);
             let cp = if cdt < 0.0 { cp_w } else { leeward_cp };
 
             let rey = (air_density * vm * length_ref) / dyn_viscosity;
+            let knudsen = 1.482 * lmach / rey.max(1e-5);
+            let slip_correction = 1.0 / (1.0 + knudsen);
+
             let cf = if rey > 1e5 {
-                (0.074 * fast_inv_fifth_root(rey as f32)) as f64
+                0.074 * fast_inv_fifth_root(rey)
             } else {
                 0.002
-            };
+            } * slip_correction;
             let qq = 0.5 * air_density * vm * vm;
 
             let fnrm = -n_scalar * (qq * cp * area_scalar);
@@ -862,7 +892,7 @@ mod tests {
     #[test]
     fn test_fast_inv_fifth_root() {
         // Range of typical Reynolds numbers for turbulent flow
-        let test_vals: [f32; 6] = [1e4, 1e5, 1e6, 1e7, 1e8, 1e9];
+        let test_vals: [f64; 6] = [1e4, 1e5, 1e6, 1e7, 1e8, 1e9];
         for &val in &test_vals {
             let exact = val.powf(-0.2);
             let approx = fast_inv_fifth_root(val);
