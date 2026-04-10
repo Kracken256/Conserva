@@ -38,6 +38,8 @@ fn evaluate_pid(kp: f64, ki: f64, kd: f64, max_time: f64, dt: f64) -> f64 {
     let mut itae_accumulator = 0.0;
     let mut min_dist = f64::MAX;
     let mut landed_early = false;
+    let mut max_w = 0.0_f64;
+    let mut total_w = 0.0_f64;
 
     // Quick evaluate limit for optimization loops
     let early_termination_limit = max_time;
@@ -61,37 +63,59 @@ fn evaluate_pid(kp: f64, ki: f64, kd: f64, max_time: f64, dt: f64) -> f64 {
         // This heavily penalizes oscillations that persist into late flight
         itae_accumulator += time * error * dt;
 
-        // Penalty for high angular rates (jitter)
+        // Track angular rate metrics to penalize jitter, tumbling, and excessive control effort
         let w_mag = twin.state.angular_velocity.map(|v| v.value).norm();
-        itae_accumulator += w_mag * 5.0 * dt;
+        total_w += w_mag * dt;
+        if w_mag > max_w {
+            max_w = w_mag;
+        }
+
+        // Instant failure cap: if the vehicle starts tumbling violently (e.g. >10 rad/s), kill the run
+        // This stops the solver from exploring wildly unstable control realms that happen to coast near the target
+        if w_mag > 10.0 {
+            return f64::MAX;
+        }
 
         if current_pos.z <= 0.0 && time > 0.5 {
             landed_early = true;
             break;
         }
 
-        // Success condition: within 10m of waypoint
+        // Success condition: within 4m of waypoint
         if error < 4.0 {
-            return itae_accumulator;
+            // Factor in max wobble to ensure clean intercepts instead of spiraling into the target
+            return itae_accumulator + (max_w * 50.0) + (total_w * 10.0);
         }
     }
 
     // Failure: Did not reach waypoint.
-    // Return ITAE plus a massive penalty based on how far away we finished.
-    let failure_penalty = if landed_early { 5000.0 } else { 2000.0 };
-    itae_accumulator + failure_penalty + (min_dist * 10.0)
+    // Apply a quadratic penalty to the distance constraint to force a stronger gradient towards the target.
+    let failure_penalty = if landed_early { 50000.0 } else { 10000.0 };
+    itae_accumulator + failure_penalty + min_dist.powi(2) + (max_w * 100.0)
 }
 
 fn main() {
-    let dt_arg = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "0.001".to_string());
-    let dt: f64 = dt_arg
-        .parse()
-        .expect("dt must be a valid strictly positive f64 number");
+    let mut dt = 0.001;
+    let mut epochs = 60;
 
-    let epochs = 60;
-    let num_wolves = 60;
+    let args: Vec<String> = std::env::args().collect();
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "--dt" && i + 1 < args.len() {
+            dt = args[i + 1]
+                .parse()
+                .expect("--dt must be a valid positive f64 number");
+            i += 1;
+        } else if args[i] == "--epochs" && i + 1 < args.len() {
+            epochs = args[i + 1]
+                .parse()
+                .expect("--epochs must be a valid integer");
+            i += 1;
+        }
+        i += 1;
+    }
+
+    let num_wolves = 200;
 
     println!(
         "Starting Grey Wolf Optimizer (GWO) with dt = {}, {} wolves for {} epochs...",
@@ -99,7 +123,7 @@ fn main() {
     );
 
     // Search Space Boundaries
-    let bounds = [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)]; // Kp, Ki, Kd
+    let bounds = [(0.0, 1.0), (0.0, 0.5), (0.0, 1.0)]; // Kp, Ki, Kd
 
     let mut wolves: Vec<Wolf> = (0..num_wolves)
         .map(|_| {
@@ -128,7 +152,7 @@ fn main() {
     let pb = ProgressBar::new((epochs * num_wolves) as u64);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} | Alpha ITAE: {msg}")
+            .template("[{elapsed_precise} < {eta_precise}] [{bar:40.cyan/blue}] {pos}/{len} | Alpha ITAE: {msg}")
             .unwrap(),
     );
 
