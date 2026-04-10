@@ -696,28 +696,44 @@ mod tests {
         assert!((a.z - b.z).abs() < tol, "Z mismatch: {} vs {}", a.z, b.z);
     }
 
+    fn assert_approx_eq(a: f64, b: f64, tol: f64) {
+        assert!(
+            (a - b).abs() < tol,
+            "Expected ~{}, got {} (diff {})",
+            b,
+            a,
+            (a - b).abs()
+        );
+    }
+
     #[test]
-    fn test_subsonic_force() {
+    fn test_atmosphere_model_sea_level() {
+        let (rho, sos, dyn_visc) = lookup_atmosphere(0.0);
+        assert_approx_eq(rho, 1.225, 0.001);
+        assert_approx_eq(sos, 340.297, 0.01);
+        assert_approx_eq(dyn_visc, 1.789e-5, 1e-8);
+    }
+
+    #[test]
+    fn test_subsonic_force_exact() {
         let mut solver = AeroSolver::default();
         let sos = 340.0;
         let v_z = 0.5 * sos; // Mach 0.5 -> Subsonic
         let state = create_dummy_state(Vector3::new(0.0, 0.0, v_z), Vector3::zeros());
 
-        let n = Vector3::new(0.0, 0.0, 1.0); // Facing directly into the 'wind' (which is coming relative to +Z velocity, so air comes from +Z)
+        let n = Vector3::new(0.0, 0.0, 1.0); // Facing directly into the '+Z' wind
         let mesh = create_faces(&[n, n, n, n], &[1.0, 1.0, 1.0, 1.0], &[Vector3::zeros(); 4]);
 
         let out = solver.calculate_forces(&mesh, &state, 1.225, sos, 1.8e-5);
 
-        // Windward coefficient:
+        // Windward coefficient (Mach 0.5):
         // beta = sqrt(1 - 0.5^2) = 0.866025
         // V_mag = 170.0
         // q = 0.5 * 1.225 * 170^2 = 17701.25
-        // Cp = (1.0 * 2.0) / 0.866025 = 2.3094
+        // Cp = (1.0 * 2.0) / 0.866025 = 2.309401
         // Area = 4.0
-        // Expected Force Z = q * Cp * Area = 17701.25 * 2.3094 * 4.0 = ~163533.15
-
-        // Force is applied in opposite direction of normal (-Z)
-        assert!(out.force.z < -100000.0);
+        // Expected Force Z = -q * Cp * Area = -163517.14
+        assert_approx_eq(out.force.z, -163517.14, 1.0);
         assert_vec3_eq(
             Vector3::new(out.force.x, out.force.y, 0.0),
             Vector3::zeros(),
@@ -727,17 +743,47 @@ mod tests {
     }
 
     #[test]
-    fn test_transonic_force() {
+    fn test_transonic_force_exact() {
         let mut solver = AeroSolver::default();
         let sos = 340.0;
-        let v_z = 1.0 * sos; // Mach 1.0 -> Transonic
+        let v_z = 1.0 * sos; // Mach 1.0 -> exactly middle of Transonic blend
         let state = create_dummy_state(Vector3::new(0.0, 0.0, v_z), Vector3::zeros());
 
         let n = Vector3::new(0.0, 0.0, 1.0);
         let mesh = create_faces(&[n, n, n, n], &[1.0, 1.0, 1.0, 1.0], &[Vector3::zeros(); 4]);
 
         let out = solver.calculate_forces(&mesh, &state, 1.225, sos, 1.8e-5);
-        assert!(out.force.z < -200000.0); // Large transonic drag
+
+        // Exactly Mach 1.0 translates to mach_blend = 0.5
+        // cp_sub = 2 / sqrt(1 - 0.64) = 3.3333...
+        // cp_sup = 2 / sqrt(1.44 - 1) = 3.015113...
+        // Cp_blend = 3.1742...
+        // q = 0.5 * 1.225 * 340^2 = 70805.0
+        // Fz = -70805.0 * 3.1742 * 4.0 = -899003.54
+        assert_approx_eq(out.force.z, -899003.54, 2.0);
+    }
+
+    #[test]
+    fn test_lateral_aerodynamics_angle_of_attack() {
+        let mut solver = AeroSolver::default();
+        let sos = 340.0;
+
+        // V = 100 in X, 100 in Z
+        let state = create_dummy_state(Vector3::new(100.0, 0.0, 100.0), Vector3::zeros());
+        let n = Vector3::new(0.0, 0.0, 1.0); // Flat plate facing +Z
+        let mesh = create_faces(&[n], &[1.0], &[Vector3::zeros()]);
+
+        let out = solver.calculate_forces(&mesh, &state, 1.225, sos, 1.8e-5);
+
+        // Exact math constraints:
+        // normal force isolates only the compression component facing exactly into the oncoming Z stream.
+        // The plate generates exactly Fz = -19050.26 from normal forces.
+        assert_approx_eq(out.force.z, -19050.26, 1.0);
+
+        // Lateral velocity vt causes skin friction pulling tangentially in -X direction.
+        // It must be negative, modeling drag rubbing against the sliding flow.
+        assert!(out.force.x < -0.0);
+        assert_approx_eq(out.force.y, 0.0, 1e-6);
     }
 
     #[test]
@@ -753,9 +799,11 @@ mod tests {
         let out = solver.calculate_forces(&mesh, &state, 1.225, sos, 1.8e-5);
 
         // Supersonic Ackeret:
-        // beta = sqrt(3^2 - 1) = sqrt(8) = 2.828
-        // Cp = 2 / 2.828 = 0.707
-        assert!(out.force.z < -100000.0);
+        // beta = sqrt(3^2 - 1) = sqrt(8) = 2.828427
+        // Cp = 2 / 2.828427 = 0.707106
+        // q = 0.5 * 1.225 * 1020^2 = 637245.0
+        // Expected Force Z = -q * Cp * Area = -1802401.04
+        assert_approx_eq(out.force.z, -1802401.04, 2.0);
     }
 
     #[test]
@@ -769,7 +817,16 @@ mod tests {
         let mesh = create_faces(&[n, n, n, n], &[1.0, 1.0, 1.0, 1.0], &[Vector3::zeros(); 4]);
 
         let out = solver.calculate_forces(&mesh, &state, 1.225, sos, 1.8e-5);
-        assert!(out.force.z < -1000000.0); // Very large hypersonic drag
+
+        // Hypersonic Hybrid Ackeret + Newtonian:
+        // blend = (6.0 - 5.0) / 2.0 = 0.5
+        // beta_5 = sqrt(25.0 - 1.0) = sqrt(24) = 4.898979
+        // cp_ackeret = 2 / sqrt(24) = 0.408248
+        // cp_newt = 2.0
+        // Cp = 0.408248 * 0.5 + 2.0 * 0.5 = 1.204124
+        // q = 0.5 * 1.225 * 2040^2 = 2548980.0
+        // Expected Force Z = -q * Cp * Area = -12277153.45
+        assert_approx_eq(out.force.z, -12277153.45, 2.0);
     }
 
     #[test]
@@ -881,7 +938,13 @@ mod tests {
         let out = solver.calculate_forces(&mesh, &state, 1.225, sos, 1.8e-5);
 
         // A pure pitch acting on fins creates opposing drag loads that generate a pure damping torque on X
-        assert!(out.torque.x < -100.0); // It asserts a damping torque opposite to the angular velocity (10.0)
+        // Mach = 10 / 340 = 0.0294
+        // q = 0.5 * 1.225 * 10^2 = 61.25
+        // Cp_windward = 2.0 / sqrt(1 - 0.0294^2) = 2.00086
+        // Face 1 F_z = -122.55, causes x_torque = 1.0 * F_z = -122.55
+        // Face 2 F_z = +122.55, causes x_torque = -1.0 * F_z = -122.55
+        // Expected Torque X = -245.10
+        assert_approx_eq(out.torque.x, -245.10, 1.0); // Damping torque opposite to rotation
         assert_vec3_eq(
             Vector3::new(0.0, out.torque.y, out.torque.z),
             Vector3::zeros(),
