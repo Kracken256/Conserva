@@ -3,82 +3,204 @@ use serde::{Deserialize, Serialize};
 use uom::si::f64::{Angle, AngularVelocity, Force, Length, Mass, Time};
 use uom::si::time::second;
 
+/// Defines the overarching geometric archetype of the missile's forwardmost aerodynamic surface.
+/// The nosecone plays a disproportionately massive role in dictating the vehicle's total
+/// supersonic wave drag and sub-sonic pressure distribution. Selecting the proper shape
+/// requires balancing internal volume requirements against external thermal heating and drag
+/// penalties across different Mach regimes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "shape", rename_all = "snake_case")]
 pub enum NoseconeShape {
+    /// A standard conical nosecone. This shape features straight lines extending directly from the
+    /// tip to the main body cylinder. It is simple to manufacture and provides decent supersonic
+    /// drag characteristics. However, it may not be the most aerodynamically efficient shape for
+    /// all flight regimes, exhibiting separated flow at the shoulder.
     Conical {
+        /// The axial length of the conical section.
         length: Length,
+
         /// Radius of spherical blunting at the tip. None for infinitely sharp.
         blunting_radius: Option<Length>,
     },
+
+    /// An ogive nosecone shape. This profile curves smoothly into the body, offering a better
+    /// aerodynamic transition than a basic cone. It is commonly used to reduce wave drag in
+    /// supersonic flight while maintaining a sharp tip. It requires more complex manufacturing
+    /// but yields significantly improved aerodynamic performance and internal payload volume.
     Ogive {
+        /// The axial length of the ogive section.
         length: Length,
+
         /// Radius of spherical blunting at the tip.
         blunting_radius: Option<Length>,
-        /// If specified, generates a Secant Ogive with this profile curve radius. If None, computes a Tangent Ogive.
+
+        /// If specified, generates a Secant Ogive with this profile curve radius. If None,
+        /// computes a Tangent Ogive.
         secant_radius: Option<Length>,
     },
+
+    /// An elliptical nosecone design. This geometry utilizes a classic ellipse curve to provide
+    /// a blunt, high-volume forward section. Blunt profiles like this are frequently preferred in
+    /// subsonic rockets or extreme hypersonic regimes where thermal heating outpaces wave drag
+    /// concerns. It provides maximum internal payload space at the extreme forward tip.
     Elliptical {
+        /// The axial length of the elliptical section.
         length: Length,
-    }, // Already blunt
+    },
+
+    /// A parabolic nosecone configuration. This geometry features a blunter tip compared to the
+    /// ogive shape while still curving smoothly into the main body cylinder. It is often utilized
+    /// to manage aerodynamic heating at very high speeds, as the blunter tip dissipates thermal
+    /// energy more effectively. The shape factor can be varied from a cone to a full parabola.
     Parabolic {
+        /// The axial length of the parabolic section.
         length: Length,
+
         /// Shape factor K. 0.0 is a cone, 1.0 is a full parabola.
         k_factor: f64,
+
+        /// Radius of spherical blunting at the tip.
         blunting_radius: Option<Length>,
     },
+
+    /// A power-series geometric profile. This advanced contour relies on a mathematical power
+    /// factor to define the sweeping shape curve from the tip to the shoulder. It enables
+    /// meticulous optimization of the aerodynamic profile according to specialized flow
+    /// conditions or custom constraints. Fractional powers typically create blunt tips while
+    /// larger powers yield sharp, elongated needle profiles.
     PowerSeries {
+        /// The axial length of the power-series section.
         length: Length,
+
         /// Power factor n. Shape curve: y = R * (x/L)^n
         n: f64,
+
+        /// Radius of spherical blunting at the tip.
         blunting_radius: Option<Length>,
     },
+
+    /// A Haack series aerodynamic contour. Discovered mathematically to minimize wave drag, these
+    /// shapes are not constructed from geometric primitives but rather from analytical drag equations.
+    /// Variations include the Von Karman (LD-Haack) and LV-Haack profiles, tailored for lowest drag
+    /// given a defined length/diameter or volume/diameter ratio respectively. They are heavily
+    /// utilized in professional high-altitude telemetry vehicles.
     Haack {
+        /// The axial length of the Haack series section.
         length: Length,
+
         /// C multiplier for Haack series. 0.0 for LD-Haack (Von Karman), 1.0/3.0 for LV-Haack.
         c_factor: f64,
+
+        /// Radius of spherical blunting at the tip.
         blunting_radius: Option<Length>,
     },
 }
 
-impl NoseconeShape {
-    /// Gets the structural length of the nosecone
-    pub fn length(&self) -> Length {
-        match self {
-            Self::Conical { length, .. } => *length,
-            Self::Ogive { length, .. } => *length,
-            Self::Elliptical { length, .. } => *length,
-            Self::Parabolic { length, .. } => *length,
-            Self::PowerSeries { length, .. } => *length,
-            Self::Haack { length, .. } => *length,
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "profile", rename_all = "snake_case")]
+pub enum FinEdgeProfile {
+    Straight,
+
+    /// An arc extending away from the straight chord line by the specified `depth`. A
+    /// positive depth value bows the edge outward, creating a convex profile. A
+    /// negative depth value scoops the edge inward, creating a concave profile. This
+    /// parameter enables sophisticated aerodynamic contouring.
+    Curved {
+        depth: Length,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FinGeometry {
+    /// The total number of fins symmetrically distributed around the missile body. This
+    /// directly impacts the aerodynamic stability and total surface area of the
+    /// vehicle. Typical values range from 3 to 4 depending on the desired control
+    /// authority. It is assumed the fins are evenly spaced radially.
+    pub num_fins: u32,
+
+    /// The axial distance measured from the absolute tip of the nose to the leading
+    /// edge of the fins at their root attachment point. This value positions the fin
+    /// assembly longitudinally along the body. Accurate placement here is critical for
+    /// determining the center of pressure. It dictates the lever arm available for
+    /// aerodynamic stabilization.
+    pub offset_from_nose: Length,
+
+    /// The physical length of the fin's root edge, defining the structural attachment
+    /// footprint to the main body. This chord length provides the physical base for
+    /// transferring aerodynamic loads into the airframe. A longer root chord generally
+    /// increases the structural integrity of the fin joint. It spans from the root
+    /// leading edge to the root trailing edge.
+    pub root_chord: Length,
+
+    /// The physical length of the fin's outermost tip edge, which runs parallel to the
+    /// longitudinal axis of the body. If this value is set to zero, the fin geometry
+    /// collapses into a simple triangular shape. A non-zero tip chord creates a
+    /// trapezoidal or swept platform. It significantly influences the tip vortex and
+    /// aerodynamic efficiency.
+    pub tip_chord: Length,
+
+    /// The radially outward distance extending from the fin's base root all the way to
+    /// its outermost tip. This measurement defines the total spanwise reach of the
+    /// aerodynamic surface into the free stream. A larger span increases the
+    /// stabilizing moment and lift generation. It must be balanced against mechanical
+    /// bending stresses and launch rail clearances.
+    pub span: Length,
+
+    /// The axial distance running parallel to the body from the root's leading edge to
+    /// the tip's leading edge. This parameter defines the mechanical sweep of the fin
+    /// structure. Positive sweep delays the onset of transonic drag rise and moves the
+    /// aerodynamic center aft. It is a vital parameter for high-speed stability tuning.
+    pub sweep_length: Length,
+
+    /// The structural thickness of the fin extending laterally across its cross-
+    /// section. This defines the physical volume and material heft of the control
+    /// surface. Thicker fins provide greater mechanical strength but at the cost of
+    /// increased parasitic drag. It is typically sized based on the material yield
+    /// strength and flutter margins.
+    pub thickness: Length,
+
+    /// The geometrical contour logic designated for the front-facing leading edge of
+    /// the fin. This allows the forward boundary to deviate from a standard straight
+    /// line into complex curves. It dictates how the fluid flow initially impacts and
+    /// splits around the fin structure. Customizing this profile can optimize sub-sonic
+    /// and supersonic wave distributions.
+    pub leading_edge_profile: FinEdgeProfile,
+
+    /// The geometrical contour logic designated for the rear-facing trailing edge of
+    /// the fin. This allows the aft boundary to be uniquely shaped independently of the
+    /// leading edge. It determines the flow separation characteristics and base drag
+    /// profile. Sweeping or curving this edge can minimize turbulent wake effects.
+    pub trailing_edge_profile: FinEdgeProfile,
+
+    /// The lateral distance over which the leading and trailing edges uniformly taper
+    /// structurally to a sharp point. If this value is strictly 0.0, the edges remain
+    /// perfectly flat and unchamfered. Adding a chamfer significantly reduces profile
+    /// drag by eliminating blunt faces. It ensures a streamlined flow separation and
+    /// reattachment regime.
+    pub edge_chamfer: Length,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MissileGeometryConfig {
-    /// The physical shape type and parameters describing the nosecone contour and length. Different
-    /// geometries (Ogive, Conical, Parabolic) possess distinct aerodynamic drag profiles.
+    /// The physical shape type and parameters describing the nosecone contour and
+    /// length. Different geometries (Ogive, Conical, Parabolic) possess distinct
+    /// aerodynamic drag profiles.
     pub nosecone_shape: NoseconeShape,
+
     /// The total length of the main cylindrical body of the missile. It defines the primary
     /// aerodynamic acting surface and total volume. This measurement actively dictates the
     /// dimensional space available for the payload, electronics, and propellant.
     pub cylindrical_body_length: Length,
+
     /// The maximum diameter of the missile's main body tube. This measurement bounds the internal
     /// volume and dictates the frontal reference area utilized in aerodynamic drag estimations. It
     /// restricts component sizing throughout the chassis.
     pub diameter: Length,
-    /// The number of fins attached to the main body.
-    pub num_fins: u32,
-    /// The distance measured from the very tip of the missile's nose to the leading edge of the
-    /// fins at their root. This placement is highly influential on the aerodynamic center of
-    /// pressure. Shifting this surface aft generally increases passive stability bounds.
-    pub fin_offset_from_nose: Length,
-    /// The physical length of the fin's root edge where it structurally attaches to the main
-    /// external aerodynamic body. This dictates the geometric span of the control surface in the
-    /// longitudinal axis. Longer chord distances generally provide a broader surface area for
-    /// control authority.
-    pub fin_chord_length: Length,
+
+    /// Detailed geometry parameterizing the precise aerodynamic and structural
+    /// properties of the main fins.
+    pub fin_set: FinGeometry,
+
     /// A time-series interpolation mapping that models the 3D center of gravity relative to the
     /// vehicle's geometric center over the duration of the flight. As solid motor propellant
     /// depletes, the true mass center dynamically shifts, forcing physics recalculations.
@@ -93,26 +215,31 @@ pub struct MissileControllerConfig {
     /// absolute current pitch error scale. High values quicken responsiveness but run the risk of
     /// triggering severe oscillations.
     pub pitch_pid_kp: f64,
+
     /// The integral gain tuning constant for the automated pitch control loop. It aggregates and
     /// counters accumulated error histories to wash out steady-state offsets—like persistent
     /// gravity sag. However, an excessively large value often manifests as delayed overshoots and
     /// integral windups.
     pub pitch_pid_ki: f64,
+
     /// The derivative gain scaling factor governing the pitch control loop dampening. It estimates
     /// future errors by observing the rate of change of the immediate pitch displacement,
     /// preemptively braking rapid orientation shifts. This critical damping component aids in
     /// smoothing out rapid flight maneuvers.
     pub pitch_pid_kd: f64,
+
     /// The unscaled proportional gain factor controlling the horizontal thrust vector control and
     /// fin yaw loop. It produces immediate physical reactions when the current telemetry heading
     /// deviates from the navigational target heading. Proper tuning tightens flight tracking
     /// capabilities against active lateral constraints.
     pub yaw_pid_kp: f64,
+
     /// The foundational integral multiplier backing the horizontal yaw control loop tuning. It
     /// steadily ramps up correction commands if the heading persistently lingers off-band due to
     /// unresolved continuous disturbances. This function acts primarily to negate sustained
     /// environmental crosswinds over an extended trajectory.
     pub yaw_pid_ki: f64,
+
     /// The primary derivative scaling value managing the horizontal yaw correction rate dampening.
     /// It sharply reacts to the immediate velocity of the yaw error variation to heavily cushion
     /// rotational movement and prevent rapid heading overshoot snaps. This stabilizing force
@@ -123,24 +250,29 @@ pub struct MissileControllerConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MissileEngineConfig {
     /// An interpolated time-series array establishing the engine's functional thrust mapping
-    /// profile over its comprehensive burn span. Each vertex binds a timestamp to the maximum total
-    /// force the exhaust plume exerts on the airframe. The completion of this trace fundamentally
-    /// indicates motor burnout and aerodynamic coasting operations.
+    /// profile over its comprehensive burn span. Each vertex binds a timestamp to the
+    /// maximum total force the exhaust plume exerts on the airframe. The completion of this
+    /// trace fundamentally indicates motor burnout and aerodynamic coasting operations.
     pub motor_impulse_curve: Vec<(Time, Force)>,
+
     /// The maximum physical deflection angle allowed by the Thrust Vector Control (TVC) nozzle
     /// gimbal actuators. This hard constraint limits the magnitude of correcting moments the
     /// engine can generate in a single tick regardless of PID requests. Proper tuning ensures
-    /// the guidance software respects physical hardware servo limits without commanding over-travel.
+    /// the guidance software respects physical hardware servo limits without commanding
+    /// over-travel.
     pub max_tvc_angle: Angle,
+
     /// The absolute maximum rotational velocity at which the TVC nozzle actuators can physically
     /// pivot to a new commanded position. This slew rate introduces a critical real-world delay,
-    /// meaning large commands take several milliseconds to execute. Modeling this constraint prevents
-    /// the simulation from performing impossible instantaneous control surface snaps.
+    /// meaning large commands take several milliseconds to execute. Modeling this constraint
+    /// prevents the simulation from performing impossible instantaneous control surface snaps.
     pub tvc_slew_rate: AngularVelocity,
+
     /// The exponential time constant (tau) defining the first-order lag of the TVC actuator's
-    /// response from an idle or steady state towards the newly commanded displacement. This latency
-    /// bounds the electromechanical settling delay inherent to physical servo systems translating
-    /// voltages into momentum. A non-zero value cushions abrupt PID step commands dynamically.
+    /// response from an idle or steady state towards the newly commanded displacement.
+    /// This latency bounds the electromechanical settling delay inherent to physical servo
+    /// systems translating voltages into momentum. A non-zero value cushions abrupt PID step
+    /// commands dynamically.
     pub tvc_activation_delay: Time,
 }
 
@@ -151,52 +283,72 @@ pub struct MissileMassConfig {
     /// electronics, inert payload hardware, and empty motor casings. It establishes the physical
     /// absolute lower bounding limit for weight computations.
     pub dry_mass: Mass,
+
     /// The total accumulated gross mass of the missile on the pad, completely saturated with
     /// propellants and primed for initial flight sequences. It acts as the upper culmination value
     /// tying the inert payload to the completely loaded energy potential. It predominantly drives
     /// the scale of dynamic initial liftoff thrust-to-weight demands.
     pub wet_mass: Mass,
+
     /// An interconnected mapping series matching elapsed simulation times to the active physical,
     /// current structural mass of the air vehicle. Interpolation tracking throughout this curve
     /// accurately replicates physical matter reduction across the burn envelopes and distinct
     /// structural staging deployments. The resulting transient variable extensively modifies
     /// ongoing gravitational and rotational inertias bindings.
     pub mass_curve: Vec<(Time, Mass)>,
-    /// An interpolated time-series mapping that tracks the dynamic 3x3 inertia tensor matrix over the
-    /// duration of the motor burn. As solid propellant mass depletes, the vehicle's structural
-    /// resistance to pitch, yaw, and roll torques constantly shifts. The physics engine continually
-    /// evaluates this curve to accurately model changing rotational kinetics and moment distributions
-    /// throughout the entire flight envelope.
+
+    /// An interpolated time-series mapping that tracks the dynamic 3x3 inertia tensor
+    /// matrix over the duration of the motor burn. As solid propellant mass depletes, the
+    /// vehicle's structural resistance to pitch, yaw, and roll torques constantly shifts.
+    /// The physics engine continually evaluates this curve to accurately model changing
+    /// rotational kinetics and moment distributions throughout the entire flight envelope.
     pub inertia_tensor_curve: Vec<(Time, Matrix3<f64>)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MissileConfig {
-    /// Gathers all defining structural boundary measurements obligatory for constructing the three-
-    /// dimensional airframe chassis. This envelope fundamentally incorporates base diameters
-    /// alongside length offsets essential for assembling realistic geometry structures.
-    /// Consequently, it dominates the resulting baseline estimations mapped during physics solver
-    /// friction integration.
+    /// Gathers all defining structural boundary measurements obligatory for
+    /// constructing the three-dimensional airframe chassis. This envelope fundamentally
+    /// incorporates base diameters alongside length offsets essential for assembling
+    /// realistic geometry structures. Consequently, it dominates the resulting baseline
+    /// estimations mapped during physics solver friction integration.
     pub geometry: MissileGeometryConfig,
+
     /// Orchestrates the internally verified tuning scale mappings for the main execution guidance
     /// loops regulating flight path handling. The values embedded here instruct precisely how raw
     /// orientation telemetry discrepancies resolve into executable fin-actioned deflections during
     /// tick iterations. Calibrating this unit accurately assures rigid trajectory maintenance
     /// without yielding active vehicle authorities to chaotic harmonic breakdowns.
     pub controller: MissileControllerConfig,
+
     /// Delineates the propulsive capacity constraints modeling the primary energy propulsion
     /// subsystem capabilities attached to the missile structure. It intrinsically establishes the
     /// maximum bounds for acceleratory thrust operations applied during physics force integrations
     /// through time-mapped active profile evaluations. Therefore, it injects the critical forward
     /// momentum indispensable for achieving dynamic flight stability.
     pub engine: MissileEngineConfig,
-    /// Manages the fundamental kinematic state constraints, including the inert bounds spanning the
-    /// peak physical wet deployment masses down through totally depleted dry casings. It dictates
-    /// the structural moment distribution tracking across non-linear transient burn envelopes
-    /// seamlessly synchronized within physics derivations. The rigid rotational matrix tensors
-    /// bundled strictly enforce handling rigidity constraints applied against the physics engine
-    /// torques.
+
+    /// Manages the fundamental kinematic state constraints, including the inert bounds
+    /// spanning the peak physical wet deployment masses down through totally depleted dry casings.
+    /// It dictates the structural moment distribution tracking across non-linear transient burn
+    /// envelopes seamlessly synchronized within physics derivations. The rigid rotational matrix
+    /// tensors bundled strictly enforce handling rigidity constraints applied against the physics
+    /// engine torques.
     pub mass: MissileMassConfig,
+}
+
+impl NoseconeShape {
+    /// Gets the structural length of the nosecone
+    pub fn length(&self) -> Length {
+        match self {
+            Self::Conical { length, .. } => *length,
+            Self::Ogive { length, .. } => *length,
+            Self::Elliptical { length, .. } => *length,
+            Self::Parabolic { length, .. } => *length,
+            Self::PowerSeries { length, .. } => *length,
+            Self::Haack { length, .. } => *length,
+        }
+    }
 }
 
 impl MissileGeometryConfig {
@@ -354,9 +506,18 @@ mod tests {
             },
             cylindrical_body_length: Length::new::<meter>(1.0),
             diameter: Length::new::<meter>(0.1),
-            num_fins: 4,
-            fin_offset_from_nose: Length::new::<meter>(0.9),
-            fin_chord_length: Length::new::<meter>(0.1),
+            fin_set: FinGeometry {
+                num_fins: 4,
+                offset_from_nose: Length::new::<meter>(0.9),
+                root_chord: Length::new::<meter>(0.1),
+                tip_chord: Length::new::<meter>(0.05),
+                span: Length::new::<meter>(0.15),
+                sweep_length: Length::new::<meter>(0.02),
+                thickness: Length::new::<meter>(0.005),
+                leading_edge_profile: FinEdgeProfile::Straight,
+                trailing_edge_profile: FinEdgeProfile::Straight,
+                edge_chamfer: Length::new::<meter>(0.0),
+            },
             cg_curve: vec![],
         }
     }

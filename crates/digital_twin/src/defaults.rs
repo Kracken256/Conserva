@@ -65,9 +65,18 @@ pub fn get_default_config() -> MissileConfig {
             },
             cylindrical_body_length: Length::new::<meter>(1.4),
             diameter: Length::new::<meter>(0.1),
-            num_fins: 4,
-            fin_offset_from_nose: Length::new::<meter>(1.2),
-            fin_chord_length: Length::new::<meter>(0.2),
+            fin_set: FinGeometry {
+                num_fins: 4,
+                offset_from_nose: Length::new::<meter>(1.2),
+                root_chord: Length::new::<meter>(0.2),
+                tip_chord: Length::new::<meter>(0.1),
+                span: Length::new::<meter>(0.2),
+                sweep_length: Length::new::<meter>(0.05),
+                thickness: Length::new::<meter>(0.005),
+                leading_edge_profile: FinEdgeProfile::Straight,
+                trailing_edge_profile: FinEdgeProfile::Straight,
+                edge_chamfer: Length::new::<meter>(0.0),
+            },
             cg_curve: vec![
                 (
                     Time::new::<second>(0.0),

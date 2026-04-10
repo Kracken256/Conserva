@@ -246,100 +246,119 @@ impl TheMeshGenerator {
 
     fn generate_fins(&self, config: &MissileConfig, radius: f64, top_z: f64, mesh: &mut Mesh) {
         let pi = std::f64::consts::PI;
-        let fin_offset = config.geometry.fin_offset_from_nose.get::<meter>();
-        let fin_chord = config.geometry.fin_chord_length.get::<meter>();
-        let span = radius * 3.0; // Reasonable fin stick-out distance
-        let fin_thickness = radius * 0.05_f64.max(0.001); // 5% of radius or minimum 1mm
+        let fin = &config.geometry.fin_set;
+        let offset = fin.offset_from_nose.get::<meter>();
+        let root_c = fin.root_chord.get::<meter>();
+        let tip_c = fin.tip_chord.get::<meter>();
+        let span = fin.span.get::<meter>();
+        let sweep = fin.sweep_length.get::<meter>();
+        let thickness = fin.thickness.get::<meter>();
+        let chamfer = fin.edge_chamfer.get::<meter>();
+        let num_fins = fin.num_fins;
 
-        let num_fins = config.geometry.num_fins;
-        let fin_top_z = top_z - fin_offset;
-        let fin_bot_z = fin_top_z - fin_chord;
+        let root_le_z = top_z - offset;
+        let root_te_z = root_le_z - root_c;
+
+        let tip_le_z = root_le_z - sweep;
+        let tip_te_z = tip_le_z - tip_c;
+
+        let le_depth = match fin.leading_edge_profile {
+            digital_twin_glue::prelude::FinEdgeProfile::Straight => 0.0,
+            digital_twin_glue::prelude::FinEdgeProfile::Curved { depth } => depth.get::<meter>(),
+        };
+        let te_depth = match fin.trailing_edge_profile {
+            digital_twin_glue::prelude::FinEdgeProfile::Straight => 0.0,
+            digital_twin_glue::prelude::FinEdgeProfile::Curved { depth } => depth.get::<meter>(),
+        };
+
+        // We slice the fin span into several stacks to give resolution for the curves.
+        let fin_stacks = 10;
 
         for i in 0..num_fins {
             let angle = 2.0 * pi * (i as f64) / (num_fins as f64);
-
-            // Perpendicular vector for thickness
             let fw_x = angle.cos();
             let fw_y = angle.sin();
             let side_x = -angle.sin();
             let side_y = angle.cos();
 
-            let half_t = fin_thickness / 2.0;
-
-            // Geometry of one fin: root top, root bot, tip tip
-            // Left side (CCW with side vector subtracted)
+            let half_t = thickness / 2.0;
             let fin_base_idx = mesh.vertices.len() as u32;
 
-            // 0: Root Top Left
-            mesh.vertices.push(Vector3::new(
-                radius * fw_x - side_x * half_t,
-                radius * fw_y - side_y * half_t,
-                fin_top_z,
-            ));
-            // 1: Root Bot Left
-            mesh.vertices.push(Vector3::new(
-                radius * fw_x - side_x * half_t,
-                radius * fw_y - side_y * half_t,
-                fin_bot_z,
-            ));
-            // 2: Tip Left
-            mesh.vertices.push(Vector3::new(
-                (radius + span) * fw_x - side_x * half_t,
-                (radius + span) * fw_y - side_y * half_t,
-                fin_bot_z,
-            ));
+            for k in 0..=fin_stacks {
+                let t = k as f64 / fin_stacks as f64;
+                let r_k = radius + span * t;
 
-            // Right side (CCW with side vector added)
-            // 3: Root Top Right
-            mesh.vertices.push(Vector3::new(
-                radius * fw_x + side_x * half_t,
-                radius * fw_y + side_y * half_t,
-                fin_top_z,
-            ));
-            // 4: Root Bot Right
-            mesh.vertices.push(Vector3::new(
-                radius * fw_x + side_x * half_t,
-                radius * fw_y + side_y * half_t,
-                fin_bot_z,
-            ));
-            // 5: Tip Right
-            mesh.vertices.push(Vector3::new(
-                (radius + span) * fw_x + side_x * half_t,
-                (radius + span) * fw_y + side_y * half_t,
-                fin_bot_z,
-            ));
+                let uncurved_le = root_le_z * (1.0 - t) + tip_le_z * t;
+                let uncurved_te = root_te_z * (1.0 - t) + tip_te_z * t;
 
-            // Left face (0, 1, 2) -> CCW
-            mesh.indices.push(fin_base_idx + 0);
-            mesh.indices.push(fin_base_idx + 1);
-            mesh.indices.push(fin_base_idx + 2);
+                let bulge = 4.0 * t * (1.0 - t);
+                let le_v = uncurved_le + le_depth * bulge;
+                let te_v = uncurved_te - te_depth * bulge;
 
-            // Right face (3, 5, 4) -> reversed to face outward
-            mesh.indices.push(fin_base_idx + 3);
-            mesh.indices.push(fin_base_idx + 5);
-            mesh.indices.push(fin_base_idx + 4);
+                let ch_l = if chamfer > 0.0 {
+                    chamfer.min((le_v - te_v) / 2.0)
+                } else {
+                    0.0
+                };
 
-            // Top edge (0, 2, 3) & (2, 5, 3)
-            mesh.indices.push(fin_base_idx + 0);
-            mesh.indices.push(fin_base_idx + 2);
-            mesh.indices.push(fin_base_idx + 3);
-            mesh.indices.push(fin_base_idx + 2);
-            mesh.indices.push(fin_base_idx + 5);
-            mesh.indices.push(fin_base_idx + 3);
+                // 6 points per slice ring to support chamfer
+                // 0: LE tip (sharp)
+                mesh.vertices.push(Vector3::new(r_k * fw_x, r_k * fw_y, le_v));
+                // 1: LE chamfer left
+                mesh.vertices.push(Vector3::new(r_k * fw_x - side_x * half_t, r_k * fw_y - side_y * half_t, le_v - ch_l));
+                // 2: LE chamfer right
+                mesh.vertices.push(Vector3::new(r_k * fw_x + side_x * half_t, r_k * fw_y + side_y * half_t, le_v - ch_l));
+                
+                // 3: TE chamfer left
+                mesh.vertices.push(Vector3::new(r_k * fw_x - side_x * half_t, r_k * fw_y - side_y * half_t, te_v + ch_l));
+                // 4: TE chamfer right
+                mesh.vertices.push(Vector3::new(r_k * fw_x + side_x * half_t, r_k * fw_y + side_y * half_t, te_v + ch_l));
+                // 5: TE tip (sharp)
+                mesh.vertices.push(Vector3::new(r_k * fw_x, r_k * fw_y, te_v));
 
-            // Back edge (1, 4, 2) & (4, 5, 2)
-            mesh.indices.push(fin_base_idx + 1);
-            mesh.indices.push(fin_base_idx + 4);
-            mesh.indices.push(fin_base_idx + 2);
-            mesh.indices.push(fin_base_idx + 4);
-            mesh.indices.push(fin_base_idx + 5);
-            mesh.indices.push(fin_base_idx + 2);
+                if k > 0 {
+                    let prev_idx = fin_base_idx + (k - 1) * 6;
+                    let curr_idx = fin_base_idx + k * 6;
 
-            // Root edge covered by main body
+                    // LE left chamfer panel
+                    mesh.indices.push(prev_idx + 0); mesh.indices.push(prev_idx + 1); mesh.indices.push(curr_idx + 1);
+                    mesh.indices.push(prev_idx + 0); mesh.indices.push(curr_idx + 1); mesh.indices.push(curr_idx + 0);
+
+                    // LE right chamfer panel
+                    mesh.indices.push(prev_idx + 2); mesh.indices.push(prev_idx + 0); mesh.indices.push(curr_idx + 0);
+                    mesh.indices.push(prev_idx + 2); mesh.indices.push(curr_idx + 0); mesh.indices.push(curr_idx + 2);
+
+                    // Left mid panel
+                    mesh.indices.push(prev_idx + 1); mesh.indices.push(prev_idx + 3); mesh.indices.push(curr_idx + 3);
+                    mesh.indices.push(prev_idx + 1); mesh.indices.push(curr_idx + 3); mesh.indices.push(curr_idx + 1);
+
+                    // Right mid panel
+                    mesh.indices.push(prev_idx + 4); mesh.indices.push(prev_idx + 2); mesh.indices.push(curr_idx + 2);
+                    mesh.indices.push(prev_idx + 4); mesh.indices.push(curr_idx + 2); mesh.indices.push(curr_idx + 4);
+
+                    // TE left chamfer panel
+                    mesh.indices.push(prev_idx + 3); mesh.indices.push(prev_idx + 5); mesh.indices.push(curr_idx + 5);
+                    mesh.indices.push(prev_idx + 3); mesh.indices.push(curr_idx + 5); mesh.indices.push(curr_idx + 3);
+
+                    // TE right chamfer panel
+                    mesh.indices.push(prev_idx + 5); mesh.indices.push(prev_idx + 4); mesh.indices.push(curr_idx + 4);
+                    mesh.indices.push(prev_idx + 5); mesh.indices.push(curr_idx + 4); mesh.indices.push(curr_idx + 5);
+                }
+            }
+
+            // Cap the Top (Tip of the fin)
+            let tip_idx = fin_base_idx + fin_stacks * 6;
+            
+            // Top LE wedge cap
+            mesh.indices.push(tip_idx + 0); mesh.indices.push(tip_idx + 1); mesh.indices.push(tip_idx + 2);
+            // Top mid quad cap
+            mesh.indices.push(tip_idx + 1); mesh.indices.push(tip_idx + 3); mesh.indices.push(tip_idx + 4);
+            mesh.indices.push(tip_idx + 1); mesh.indices.push(tip_idx + 4); mesh.indices.push(tip_idx + 2);
+            // Top TE wedge cap
+            mesh.indices.push(tip_idx + 3); mesh.indices.push(tip_idx + 5); mesh.indices.push(tip_idx + 4);
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -437,7 +456,7 @@ mod tests {
             .fold(f64::NEG_INFINITY, f64::max);
 
         let expected_body_radius = config.geometry.diameter.value / 2.0;
-        let expected_span = expected_body_radius * 3.0;
+        let expected_span = config.geometry.fin_set.span.value;
         let expected_max_radius = expected_body_radius + expected_span;
 
         assert!(
@@ -480,7 +499,7 @@ mod tests {
 
         // Fins stick out uniformly in 4 directions, so max/min X and Y should be roughly equal to max radius
         let expected_bound =
-            (config.geometry.diameter.value / 2.0) + (config.geometry.diameter.value / 2.0) * 3.0;
+            (config.geometry.diameter.value / 2.0) + config.geometry.fin_set.span.value;
 
         assert!(
             (max_x - expected_bound).abs() < 1e-2,
