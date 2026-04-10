@@ -53,12 +53,14 @@ impl TheMeshGenerator {
         let mut prev_ring_size = 1;
 
         for i in 1..=nose_stacks {
-            let t = i as f64 / nose_stacks as f64; // 0.0 to 1.0 (1.0 is base of nose)
+            let s = i as f64 / nose_stacks as f64;
+            // Square the proportional distance to massively increase geometric density right at the tip
+            let t = s * s; // 0.0 to 1.0 (1.0 is base of nose)
             let x = nose_length * t; // distance from tip downwards
 
             let current_radius =
                 Self::calculate_profile_radius(nose_shape, radius, nose_length, x, t);
-            let current_radius = Self::apply_blunting(nose_shape, current_radius, x);
+            let current_radius = Self::apply_blunting(nose_shape, current_radius, x, t);
 
             let current_z = top_z - x;
             let current_ring_idx = mesh.vertices.len() as u32;
@@ -129,7 +131,7 @@ impl TheMeshGenerator {
         }
     }
 
-    fn apply_blunting(nose_shape: &NoseconeShape, mut current_radius: f64, x: f64) -> f64 {
+    fn apply_blunting(nose_shape: &NoseconeShape, mut current_radius: f64, x: f64, t: f64) -> f64 {
         let blunting_r = match nose_shape {
             NoseconeShape::Conical {
                 blunting_radius, ..
@@ -150,9 +152,8 @@ impl TheMeshGenerator {
         };
 
         if let Some(rn) = blunting_r {
-            if x < rn {
-                current_radius = current_radius.max((rn * rn - (rn - x).powi(2)).max(0.0).sqrt());
-            }
+            let blend = (1.0 - t).max(0.0);
+            current_radius = (current_radius.powi(2) + 2.0 * rn * x * blend.powi(4)).sqrt();
         }
         current_radius
     }
@@ -273,6 +274,19 @@ impl TheMeshGenerator {
 
         // We slice the fin span into several stacks to give resolution for the curves.
         let fin_stacks = 10;
+        let mut t_values = Vec::with_capacity(fin_stacks + 2);
+        for k in 0..=fin_stacks {
+            t_values.push(k as f64 / fin_stacks as f64);
+        }
+
+        // Insert an exact division at the span-wise chamfer start so the tapering is localized
+        if chamfer > 0.0 && chamfer < span {
+            let chamfer_t = 1.0 - (chamfer / span);
+            if !t_values.iter().any(|&v| (v - chamfer_t).abs() < 1e-5) {
+                t_values.push(chamfer_t);
+                t_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            }
+        }
 
         for i in 0..num_fins {
             let angle = 2.0 * pi * (i as f64) / (num_fins as f64);
@@ -284,8 +298,7 @@ impl TheMeshGenerator {
             let half_t = thickness / 2.0;
             let fin_base_idx = mesh.vertices.len() as u32;
 
-            for k in 0..=fin_stacks {
-                let t = k as f64 / fin_stacks as f64;
+            for (k, &t) in t_values.iter().enumerate() {
                 let r_k = radius + span * t;
 
                 let uncurved_le = root_le_z * (1.0 - t) + tip_le_z * t;
@@ -301,33 +314,39 @@ impl TheMeshGenerator {
                     0.0
                 };
 
+                let current_half_t = if chamfer > 0.0 {
+                    half_t * ((span * (1.0 - t)) / chamfer).clamp(0.0, 1.0)
+                } else {
+                    half_t
+                };
+
                 // 6 points per slice ring to support chamfer
                 // 0: LE tip (sharp)
                 mesh.vertices
                     .push(Vector3::new(r_k * fw_x, r_k * fw_y, le_v));
                 // 1: LE chamfer left
                 mesh.vertices.push(Vector3::new(
-                    r_k * fw_x - side_x * half_t,
-                    r_k * fw_y - side_y * half_t,
+                    r_k * fw_x - side_x * current_half_t,
+                    r_k * fw_y - side_y * current_half_t,
                     le_v - ch_l,
                 ));
                 // 2: LE chamfer right
                 mesh.vertices.push(Vector3::new(
-                    r_k * fw_x + side_x * half_t,
-                    r_k * fw_y + side_y * half_t,
+                    r_k * fw_x + side_x * current_half_t,
+                    r_k * fw_y + side_y * current_half_t,
                     le_v - ch_l,
                 ));
 
                 // 3: TE chamfer left
                 mesh.vertices.push(Vector3::new(
-                    r_k * fw_x - side_x * half_t,
-                    r_k * fw_y - side_y * half_t,
+                    r_k * fw_x - side_x * current_half_t,
+                    r_k * fw_y - side_y * current_half_t,
                     te_v + ch_l,
                 ));
                 // 4: TE chamfer right
                 mesh.vertices.push(Vector3::new(
-                    r_k * fw_x + side_x * half_t,
-                    r_k * fw_y + side_y * half_t,
+                    r_k * fw_x + side_x * current_half_t,
+                    r_k * fw_y + side_y * current_half_t,
                     te_v + ch_l,
                 ));
                 // 5: TE tip (sharp)
@@ -335,8 +354,8 @@ impl TheMeshGenerator {
                     .push(Vector3::new(r_k * fw_x, r_k * fw_y, te_v));
 
                 if k > 0 {
-                    let prev_idx = fin_base_idx + (k - 1) * 6;
-                    let curr_idx = fin_base_idx + k * 6;
+                    let prev_idx = fin_base_idx + (k as u32 - 1) * 6;
+                    let curr_idx = fin_base_idx + k as u32 * 6;
 
                     // LE left chamfer panel
                     mesh.indices.push(prev_idx + 0);
@@ -389,7 +408,7 @@ impl TheMeshGenerator {
             }
 
             // Cap the Top (Tip of the fin)
-            let tip_idx = fin_base_idx + fin_stacks * 6;
+            let tip_idx = fin_base_idx + (t_values.len() - 1) as u32 * 6;
 
             // Top LE wedge cap
             mesh.indices.push(tip_idx + 0);
@@ -705,10 +724,18 @@ mod tests {
             blunting_radius: Some(Length::new::<meter>(0.1)),
         };
 
-        let radius_sharp =
-            TheMeshGenerator::apply_blunting(&config_sharp.geometry.nosecone_shape, 0.001, 0.05);
-        let radius_blunt =
-            TheMeshGenerator::apply_blunting(&config_blunt.geometry.nosecone_shape, 0.001, 0.05);
+        let radius_sharp = TheMeshGenerator::apply_blunting(
+            &config_sharp.geometry.nosecone_shape,
+            0.001,
+            0.05,
+            0.05,
+        );
+        let radius_blunt = TheMeshGenerator::apply_blunting(
+            &config_blunt.geometry.nosecone_shape,
+            0.001,
+            0.05,
+            0.05,
+        );
 
         // Blunted profile effectively rounds off the sharp conical tip
         assert!(radius_blunt > radius_sharp);
