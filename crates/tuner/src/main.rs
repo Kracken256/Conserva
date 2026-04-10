@@ -70,9 +70,10 @@ fn evaluate_pid(kp: f64, ki: f64, kd: f64, max_time: f64, dt: f64) -> f64 {
             max_w = w_mag;
         }
 
-        // Instant failure cap: if the vehicle starts tumbling violently (e.g. >10 rad/s), kill the run
-        // This stops the solver from exploring wildly unstable control realms that happen to coast near the target
-        if w_mag > 10.0 {
+        // Instant failure cap: if the vehicle starts tumbling violently, kill the run
+        // Increase the hard cap to allow the rocket to at least attempt aggressive maneuvers.
+        // The continuous penalties will handle the score scaling.
+        if w_mag > 20.0 {
             return f64::MAX;
         }
 
@@ -84,19 +85,27 @@ fn evaluate_pid(kp: f64, ki: f64, kd: f64, max_time: f64, dt: f64) -> f64 {
         // Success condition: within 4m of waypoint
         if error < 4.0 {
             // Factor in max wobble to ensure clean intercepts instead of spiraling into the target
-            return itae_accumulator + (max_w * 50.0) + (total_w * 10.0);
+            // L2 regularization: heavily penalize very large gains if smaller gains achieve the same flight profile
+            let gain_penalty = (kp.powi(2) + ki.powi(2) + kd.powi(2)) * 2000.0;
+            return itae_accumulator + (max_w * 5000.0) + (total_w * 500.0) + gain_penalty;
         }
     }
 
     // Failure: Did not reach waypoint.
     // Apply a quadratic penalty to the distance constraint to force a stronger gradient towards the target.
     let failure_penalty = if landed_early { 50000.0 } else { 10000.0 };
-    itae_accumulator + failure_penalty + min_dist.powi(2) + (max_w * 100.0)
+    let gain_penalty = (kp.powi(2) + ki.powi(2) + kd.powi(2)) * 2000.0;
+    itae_accumulator
+        + failure_penalty
+        + min_dist.powi(2)
+        + (max_w * 5000.0)
+        + (total_w * 500.0)
+        + gain_penalty
 }
 
 fn main() {
     let mut dt = 0.001;
-    let mut epochs = 60;
+    let mut epochs = 400;
 
     let args: Vec<String> = std::env::args().collect();
     let mut i = 1;
@@ -123,7 +132,7 @@ fn main() {
     );
 
     // Search Space Boundaries
-    let bounds = [(0.0, 1.0), (0.0, 0.5), (0.0, 1.0)]; // Kp, Ki, Kd
+    let bounds = [(0.0, 2.0), (0.0, 1.0), (0.0, 2.0)]; // Kp, Ki, Kd
 
     let mut wolves: Vec<Wolf> = (0..num_wolves)
         .map(|_| {
@@ -131,7 +140,7 @@ fn main() {
             let pos = (
                 rng.gen_range(bounds[0].0..bounds[0].1),
                 rng.gen_range(bounds[1].0..bounds[1].1),
-                rng.gen_range(bounds[2].0..bounds[2].1),
+                0.0, // Force Kd to start at 0 for the entire initial population
             );
             Wolf {
                 position: pos,
@@ -190,14 +199,14 @@ fn main() {
             }
         }
 
-        // 3. Linearly decrement 'a' from 2.0 to 0.0
+        // 3. Decrement 'a' from 2.0 to 0.0
         // hyperparameter:
         // By modifying how 'a' decreases, we affect the balance between exploration and exploitation.
-        // A common GWO hyperparameter to tune is a non-linear decrease strategy.
-        // Let's use a non-linear decay for 'a' to give more exploration early and fast exploitation late.
-        // For instance, a = 2.0 * (1.0 - (epoch as f64 / epochs as f64).powi(2));
+        // We use a slower cubic non-linear decay to give the wolves much more time to explore
+        // the space before committing to exploitation.
         let epoch_ratio = epoch as f64 / epochs as f64;
-        let a = 2.0 * (1.0 - epoch_ratio.powi(2));
+        // Using powi(3) or powi(4) keeps 'a' higher for longer, slowing the decay.
+        let a = 2.0 * (1.0 - epoch_ratio.powi(4));
 
         for w in &mut wolves {
             let mut rng = rand::thread_rng();
