@@ -4,10 +4,10 @@ use std::fs::File;
 use std::io::{self, Write};
 
 fn main() -> io::Result<()> {
-    let config = get_default_config();
-    let state = get_initial_state(&config);
+    let config = get_rocket_design();
+    let state = get_rocket_initial_state(&config);
     let mut mesh = Mesh::default();
-    let mesh_generator = TheMeshGenerator::default();
+    let mesh_generator = RocketMesh::default();
 
     println!("Generating mesh from default config...");
     mesh_generator.generate(&state, &config, &mut mesh);
@@ -51,10 +51,10 @@ mod tests {
     #[test]
     fn test_valid_obj_vertex_output() {
         // A minimal test to check if vertices format right
-        let config = get_default_config();
-        let state = get_initial_state(&config);
+        let config = get_rocket_design();
+        let state = get_rocket_initial_state(&config);
         let mut mesh = Mesh::default();
-        let mesh_generator = TheMeshGenerator::default();
+        let mesh_generator = RocketMesh::default();
 
         mesh_generator.generate(&state, &config, &mut mesh);
 

@@ -3,9 +3,9 @@ use nalgebra::Vector3;
 use uom::si::length::meter;
 
 #[derive(Debug, Clone, Default)]
-pub struct TheMeshGenerator {}
+pub struct RocketMesh {}
 
-impl MeshGenerator for TheMeshGenerator {
+impl MeshGenerator for RocketMesh {
     fn generate(&self, state: &MissileState, config: &MissileConfig, mesh: &mut Mesh) {
         let radius = config.geometry.diameter.get::<meter>() / 2.0;
         let body_length = config.geometry.cylindrical_body_length.get::<meter>();
@@ -33,7 +33,7 @@ impl MeshGenerator for TheMeshGenerator {
     }
 }
 
-impl TheMeshGenerator {
+impl RocketMesh {
     fn generate_nose_cone(
         &self,
         config: &MissileConfig,
@@ -431,7 +431,7 @@ impl TheMeshGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::design::{get_default_config, get_initial_state};
+    use crate::parameters::{get_rocket_design, get_rocket_initial_state};
 
     /// Ensure that the generated mesh treats +Z as the rocket's longitudinal
     /// axis, with the nose tip located at the maximum Z value and centered
@@ -439,10 +439,10 @@ mod tests {
     /// convention used by the physics and controller.
     #[test]
     fn mesh_nose_is_aligned_with_body_z_axis() {
-        let config = get_default_config();
-        let state = get_initial_state(&config);
+        let config = get_rocket_design();
+        let state = get_rocket_initial_state(&config);
         let mut mesh = Mesh::default();
-        let generator = TheMeshGenerator::default();
+        let generator = RocketMesh::default();
 
         generator.generate(&state, &config, &mut mesh);
 
@@ -478,10 +478,10 @@ mod tests {
 
     #[test]
     fn mesh_total_length_equals_body_plus_nose_length() {
-        let config = get_default_config();
-        let state = get_initial_state(&config);
+        let config = get_rocket_design();
+        let state = get_rocket_initial_state(&config);
         let mut mesh = Mesh::default();
-        let generator = TheMeshGenerator::default();
+        let generator = RocketMesh::default();
 
         generator.generate(&state, &config, &mut mesh);
 
@@ -510,10 +510,10 @@ mod tests {
 
     #[test]
     fn mesh_maximum_radius_includes_fins() {
-        let config = get_default_config();
-        let state = get_initial_state(&config);
+        let config = get_rocket_design();
+        let state = get_rocket_initial_state(&config);
         let mut mesh = Mesh::default();
-        let generator = TheMeshGenerator::default();
+        let generator = RocketMesh::default();
 
         generator.generate(&state, &config, &mut mesh);
 
@@ -538,10 +538,10 @@ mod tests {
 
     #[test]
     fn mesh_generates_correct_volume_bounding_box() {
-        let config = get_default_config();
-        let state = get_initial_state(&config);
+        let config = get_rocket_design();
+        let state = get_rocket_initial_state(&config);
         let mut mesh = Mesh::default();
-        let generator = TheMeshGenerator::default();
+        let generator = RocketMesh::default();
 
         generator.generate(&state, &config, &mut mesh);
 
@@ -590,10 +590,10 @@ mod tests {
 
     #[test]
     fn mesh_indices_form_complete_triangles() {
-        let config = get_default_config();
-        let state = get_initial_state(&config);
+        let config = get_rocket_design();
+        let state = get_rocket_initial_state(&config);
         let mut mesh = Mesh::default();
-        let generator = TheMeshGenerator::default();
+        let generator = RocketMesh::default();
 
         generator.generate(&state, &config, &mut mesh);
 
@@ -607,10 +607,10 @@ mod tests {
 
     #[test]
     fn mesh_contains_no_degenerate_or_infinite_vertices() {
-        let config = get_default_config();
-        let state = get_initial_state(&config);
+        let config = get_rocket_design();
+        let state = get_rocket_initial_state(&config);
         let mut mesh = Mesh::default();
-        let generator = TheMeshGenerator::default();
+        let generator = RocketMesh::default();
 
         generator.generate(&state, &config, &mut mesh);
 
@@ -630,7 +630,7 @@ mod tests {
         use uom::si::length::meter;
         use uom::si::time::second;
 
-        let mut config_cg_zero = get_default_config();
+        let mut config_cg_zero = get_rocket_design();
 
         // Modify cg curve to strictly returning 0.0 at all times
         config_cg_zero.geometry.cg_curve = vec![(
@@ -642,9 +642,9 @@ mod tests {
             ),
         )];
 
-        let state = get_initial_state(&config_cg_zero);
+        let state = get_rocket_initial_state(&config_cg_zero);
         let mut mesh_cg_zero = Mesh::default();
-        let generator = TheMeshGenerator::default();
+        let generator = RocketMesh::default();
         generator.generate(&state, &config_cg_zero, &mut mesh_cg_zero);
 
         let mut config_cg_shifted = config_cg_zero.clone();
@@ -676,12 +676,12 @@ mod tests {
 
     #[test]
     fn mesh_generates_correct_number_of_fins() {
-        let mut config = get_default_config();
+        let mut config = get_rocket_design();
         // Base vertex count without fins is the cylinder/nose components
         config.geometry.fin_set.num_fins = 0;
-        let state = get_initial_state(&config);
+        let state = get_rocket_initial_state(&config);
         let mut mesh_zero = Mesh::default();
-        let generator = TheMeshGenerator::default();
+        let generator = RocketMesh::default();
         generator.generate(&state, &config, &mut mesh_zero);
 
         let count_zero = mesh_zero.vertices.len();
@@ -710,7 +710,7 @@ mod tests {
 
     #[test]
     fn blunted_nosecone_generates_larger_tip_radius() {
-        let mut config_sharp = get_default_config();
+        let mut config_sharp = get_rocket_design();
         use uom::si::f64::Length;
         use uom::si::length::meter;
         config_sharp.geometry.nosecone_shape = NoseconeShape::Conical {
@@ -724,18 +724,10 @@ mod tests {
             blunting_radius: Some(Length::new::<meter>(0.1)),
         };
 
-        let radius_sharp = TheMeshGenerator::apply_blunting(
-            &config_sharp.geometry.nosecone_shape,
-            0.001,
-            0.05,
-            0.05,
-        );
-        let radius_blunt = TheMeshGenerator::apply_blunting(
-            &config_blunt.geometry.nosecone_shape,
-            0.001,
-            0.05,
-            0.05,
-        );
+        let radius_sharp =
+            RocketMesh::apply_blunting(&config_sharp.geometry.nosecone_shape, 0.001, 0.05, 0.05);
+        let radius_blunt =
+            RocketMesh::apply_blunting(&config_blunt.geometry.nosecone_shape, 0.001, 0.05, 0.05);
 
         // Blunted profile effectively rounds off the sharp conical tip
         assert!(radius_blunt > radius_sharp);
@@ -754,21 +746,19 @@ mod tests {
             length: Length::new::<meter>(length),
             blunting_radius: None,
         };
-        let r_conical =
-            TheMeshGenerator::calculate_profile_radius(&conical, base_radius, length, x, t);
+        let r_conical = RocketMesh::calculate_profile_radius(&conical, base_radius, length, x, t);
 
         let elliptic = NoseconeShape::Elliptical {
             length: Length::new::<meter>(length),
         };
-        let r_elliptic =
-            TheMeshGenerator::calculate_profile_radius(&elliptic, base_radius, length, x, t);
+        let r_elliptic = RocketMesh::calculate_profile_radius(&elliptic, base_radius, length, x, t);
 
         let power = NoseconeShape::PowerSeries {
             length: Length::new::<meter>(length),
             blunting_radius: None,
             n: 0.75,
         };
-        let r_power = TheMeshGenerator::calculate_profile_radius(&power, base_radius, length, x, t);
+        let r_power = RocketMesh::calculate_profile_radius(&power, base_radius, length, x, t);
 
         assert!(
             (r_conical - 0.05).abs() < 1e-6,

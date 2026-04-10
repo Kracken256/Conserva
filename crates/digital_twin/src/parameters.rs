@@ -9,7 +9,7 @@ use uom::si::mass::kilogram;
 use uom::si::time::{millisecond, second};
 use uom::si::velocity::meter_per_second;
 
-pub fn get_initial_state(config: &MissileConfig) -> MissileState {
+pub fn get_rocket_initial_state(config: &MissileConfig) -> MissileState {
     MissileState {
         position: [
             Length::new::<meter>(0.0),
@@ -39,7 +39,7 @@ pub fn get_initial_state(config: &MissileConfig) -> MissileState {
     }
 }
 
-pub fn get_default_config() -> MissileConfig {
+pub fn get_rocket_design() -> MissileConfig {
     MissileConfig {
         environment: EnvironmentalConfig::default(),
         mass: MissileMassConfig {

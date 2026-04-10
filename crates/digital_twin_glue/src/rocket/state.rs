@@ -15,3 +15,7 @@ pub struct MissileState {
     pub motor_thrust: Force,
     pub inertia_tensor: Matrix3<f64>,
 }
+
+pub trait RocketCtrl {
+    fn update(&mut self, state: &MissileState, dt: f64) -> MissileState;
+}

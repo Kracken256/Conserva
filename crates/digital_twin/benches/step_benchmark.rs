@@ -6,9 +6,9 @@ use uom::si::f64::Length;
 use uom::si::length::meter;
 
 fn bench_step(c: &mut Criterion) {
-    let config = get_default_config();
-    let state = get_initial_state(&config);
-    let mesh_generator = TheMeshGenerator::default();
+    let config = get_rocket_design();
+    let state = get_rocket_initial_state(&config);
+    let mesh_generator = RocketMesh::default();
 
     let target_vec = Vector3::new(1000.0, 1000.0, 1000.0);
     let waypoint = Some(target_vec.map(|c| Length::new::<meter>(c)));
@@ -24,7 +24,7 @@ fn bench_step(c: &mut Criterion) {
         b.iter(|| {
             twin.step(black_box(0.01));
             // Just mutate the time back manually to avoid state explosion during bench
-            twin.state.time = uom::si::f64::Time::new::<uom::si::time::second>(0.0);
+            twin.state.time = Time::new::<uom::si::time::second>(0.0);
         })
     });
     group.finish();

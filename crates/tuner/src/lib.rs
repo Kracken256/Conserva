@@ -49,7 +49,7 @@ fn evaluate_pid(
     config.controller.yaw_pid_ki = ki_curve;
     config.controller.yaw_pid_kd = kd_curve;
 
-    let state = get_initial_state(&config);
+    let state = get_rocket_initial_state(&config);
 
     let rocket = TheRocket::new(
         config.clone(),
@@ -59,7 +59,7 @@ fn evaluate_pid(
     let mut twin = DigitalTwin::new(
         config,
         state,
-        Box::new(TheMeshGenerator::default()),
+        Box::new(RocketMesh::default()),
         Box::new(rocket),
     );
 

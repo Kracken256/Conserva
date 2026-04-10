@@ -643,8 +643,8 @@ mod tests {
         use uom::si::mass::kilogram;
 
         MissileMassConfig {
-            dry_mass: uom::si::f64::Mass::new::<kilogram>(5.0),
-            wet_mass: uom::si::f64::Mass::new::<kilogram>(10.0),
+            dry_mass: Mass::new::<kilogram>(5.0),
+            wet_mass: Mass::new::<kilogram>(10.0),
             mass_curve: vec![],
             inertia_tensor_curve: vec![],
         }

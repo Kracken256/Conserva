@@ -2,14 +2,14 @@ use digital_twin::prelude::*;
 use digital_twin_glue::prelude::*;
 use std::fs::File;
 use std::io::Write;
-use uom::si::f64::{Time, Velocity};
+use uom::si::f64::{Length, Time, Velocity};
 use uom::si::length::meter;
 use uom::si::time::second;
 use uom::si::velocity::meter_per_second;
 
 fn main() -> std::io::Result<()> {
-    let config = get_default_config();
-    let mesh_generator = TheMeshGenerator::default();
+    let config = get_rocket_design();
+    let mesh_generator = RocketMesh::default();
     let body_length = config.geometry.cylindrical_body_length.get::<meter>();
     let nose_length = config.geometry.nosecone_shape.length().get::<meter>();
     let total_length = body_length + nose_length;
@@ -20,7 +20,7 @@ fn main() -> std::io::Result<()> {
 
     // For CP, we pick a fixed time and shift it back.
     let fixed_time = Time::new::<second>(0.0);
-    let mut state = get_initial_state(&config);
+    let mut state = get_rocket_initial_state(&config);
     state.time = fixed_time;
 
     let mut mesh = Mesh::default();
@@ -53,7 +53,7 @@ fn main() -> std::io::Result<()> {
         .into();
 
         // Ensure altitude is realistic
-        state.position.z = uom::si::f64::Length::new::<meter>(altitude);
+        state.position.z = Length::new::<meter>(altitude);
 
         let out = solver.calculate_forces(&mesh, &state, air_density, sos, dyn_viscosity);
 

@@ -1,9 +1,4 @@
-use crate::control::rocket::Rocket;
-use crate::control::state::MissileState;
-use crate::geometry::config::MissileConfig;
-use crate::geometry::mesh::{Mesh, MeshGenerator};
-use crate::integ;
-use crate::physics::solver::{AeroSolver, lookup_atmosphere};
+use crate::prelude::*;
 use nalgebra::{Quaternion, Rotation3, UnitQuaternion, Vector3};
 use uom::si::angle::radian;
 use uom::si::angular_velocity::{AngularVelocity, radian_per_second};
@@ -15,11 +10,11 @@ use uom::si::velocity::meter_per_second;
 pub struct DigitalTwin {
     pub config: MissileConfig,
     pub state: MissileState,
-    pub rocket: Box<dyn Rocket>,
+    pub rocket: Box<dyn RocketCtrl>,
     pub solver: AeroSolver,
     pub mesh_generator: Box<dyn MeshGenerator>,
     pub current_mesh: Mesh,
-    rk4: integ::rk4::Rk4,
+    rk4: crate::integ::Rk4,
 }
 
 impl DigitalTwin {
@@ -27,7 +22,7 @@ impl DigitalTwin {
         config: MissileConfig,
         state: MissileState,
         mesh_generator: Box<dyn MeshGenerator>,
-        rocket: Box<dyn Rocket>,
+        rocket: Box<dyn RocketCtrl>,
     ) -> Self {
         Self {
             config,
@@ -36,7 +31,7 @@ impl DigitalTwin {
             mesh_generator,
             rocket,
             current_mesh: Mesh::default(),
-            rk4: integ::rk4::Rk4 {},
+            rk4: crate::integ::Rk4 {},
         }
     }
 

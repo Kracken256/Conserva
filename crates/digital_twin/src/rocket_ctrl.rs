@@ -279,10 +279,29 @@ impl FlightComputer {
     }
 }
 
+pub struct TheRocket {
+    pub fc: FlightComputer,
+}
+
+impl TheRocket {
+    pub fn new(config: MissileConfig, waypoint: Option<Vector3<Length>>) -> Self {
+        Self {
+            fc: FlightComputer::new(config, waypoint),
+        }
+    }
+}
+
+impl RocketCtrl for TheRocket {
+    fn update(&mut self, state: &MissileState, dt: f64) -> MissileState {
+        // Execute the Flight Computer firmware loop mapping intention to output actuation
+        self.fc.tick(state, dt)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::design::{get_default_config, get_initial_state};
+    use crate::parameters::{get_rocket_design, get_rocket_initial_state};
     use uom::si::angle::degree;
     use uom::si::angular_velocity::degree_per_second;
     use uom::si::f64::AngularVelocity;
@@ -297,8 +316,8 @@ mod tests {
     /// is the forward axis used by the controller.
     #[test]
     fn waypoint_directly_ahead_requires_no_lateral_command() {
-        let config = get_default_config();
-        let state = get_initial_state(&config);
+        let config = get_rocket_design();
+        let state = get_rocket_initial_state(&config);
 
         // Place the waypoint directly in front of the rocket along +Z in world
         // (rocket starts at the origin with identity orientation).
@@ -348,7 +367,7 @@ mod tests {
 
     #[test]
     fn current_thrust_interpolates_correctly() {
-        let mut config = get_default_config();
+        let mut config = get_rocket_design();
         config.engine.motor_impulse_curve = vec![
             (Time::new::<second>(0.0), Force::new::<newton>(100.0)),
             (Time::new::<second>(1.0), Force::new::<newton>(200.0)),
@@ -370,7 +389,7 @@ mod tests {
 
     #[test]
     fn current_thrust_clamps_to_curve_bounds() {
-        let mut config = get_default_config();
+        let mut config = get_rocket_design();
         config.engine.motor_impulse_curve = vec![
             (Time::new::<second>(1.0), Force::new::<newton>(100.0)),
             (Time::new::<second>(2.0), Force::new::<newton>(200.0)),
@@ -391,8 +410,8 @@ mod tests {
 
     #[test]
     fn tick_updates_mass_from_curve() {
-        let mut config = get_default_config();
-        let state = get_initial_state(&config);
+        let mut config = get_rocket_design();
+        let state = get_rocket_initial_state(&config);
 
         config.mass.mass_curve = vec![
             (Time::new::<second>(0.0), Mass::new::<kilogram>(100.0)),
@@ -417,8 +436,8 @@ mod tests {
 
     #[test]
     fn off_axis_waypoint_generates_steering_command() {
-        let mut config = get_default_config();
-        let state = get_initial_state(&config);
+        let mut config = get_rocket_design();
+        let state = get_rocket_initial_state(&config);
         // Give some PI values to ensure commands are generated
         config.controller.pitch_pid_kp = vec![(Time::new::<second>(0.0), 1.0)];
         config.controller.yaw_pid_kp = vec![(Time::new::<second>(0.0), 1.0)];
@@ -451,13 +470,13 @@ mod tests {
 
     #[test]
     fn slew_rate_limits_tvc_command() {
-        let mut config = get_default_config();
+        let mut config = get_rocket_design();
         // Remove latency for simple slew test
         config.engine.tvc_activation_delay = Time::new::<second>(0.0);
         let slew_rate = 10.0; // deg/s
         config.engine.tvc_slew_rate = AngularVelocity::new::<degree_per_second>(slew_rate);
 
-        let state = get_initial_state(&config);
+        let state = get_rocket_initial_state(&config);
 
         config.controller.pitch_pid_kp = vec![(Time::new::<second>(0.0), 100.0)]; // ensure large command
 
@@ -483,14 +502,14 @@ mod tests {
 
     #[test]
     fn latency_filters_tvc_command() {
-        let mut config = get_default_config();
+        let mut config = get_rocket_design();
 
         let tau = 0.5; // seconds
         config.engine.tvc_activation_delay = Time::new::<second>(tau);
         // Prevent slew rate from interfering with latency test
         config.engine.tvc_slew_rate = AngularVelocity::new::<degree_per_second>(1000.0);
 
-        let state = get_initial_state(&config);
+        let state = get_rocket_initial_state(&config);
 
         config.controller.pitch_pid_kp = vec![(Time::new::<second>(0.0), 10.0)];
 
@@ -523,24 +542,5 @@ mod tests {
             expected_lagged_pitch,
             lagged_pitch
         );
-    }
-}
-
-pub struct TheRocket {
-    pub fc: FlightComputer,
-}
-
-impl TheRocket {
-    pub fn new(config: MissileConfig, waypoint: Option<Vector3<Length>>) -> Self {
-        Self {
-            fc: FlightComputer::new(config, waypoint),
-        }
-    }
-}
-
-impl Rocket for TheRocket {
-    fn update(&mut self, state: &MissileState, dt: f64) -> MissileState {
-        // Execute the Flight Computer firmware loop mapping intention to output actuation
-        self.fc.tick(state, dt)
     }
 }

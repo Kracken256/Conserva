@@ -5,6 +5,7 @@ use nalgebra::Vector3;
 use std::fs::File;
 use std::io::{self, Write};
 use std::time::Instant;
+use uom::si::f64::{Length, Velocity};
 use uom::si::length::meter;
 use uom::si::velocity::meter_per_second;
 
@@ -32,7 +33,7 @@ fn round_json_f64(val: &mut serde_json::Value) {
     }
 }
 
-fn print_state(state: &MissileState, target: Option<Vector3<uom::si::f64::Length>>) {
+fn print_state(state: &MissileState, target: Option<Vector3<Length>>) {
     let wv = state.orientation * state.body_velocity.map(|v| v.get::<meter_per_second>());
 
     let target_str = if let Some(t) = target {
@@ -98,10 +99,9 @@ struct Args {
 }
 
 fn run_simulation() {
-    let config = get_default_config();
-
-    let state = get_initial_state(&config);
-    let mesh_generator = TheMeshGenerator::default();
+    let config = get_rocket_design();
+    let state = get_rocket_initial_state(&config);
+    let mesh_generator = RocketMesh::default();
 
     // Dump config when the program starts
     save_config_json(&config);
@@ -112,9 +112,9 @@ fn run_simulation() {
     let mut first_json_entry = true;
 
     let waypoint = Some(Vector3::new(
-        uom::si::f64::Length::new::<meter>(1000.0),
-        uom::si::f64::Length::new::<meter>(1000.0),
-        uom::si::f64::Length::new::<meter>(1000.0),
+        Length::new::<meter>(1000.0),
+        Length::new::<meter>(1000.0),
+        Length::new::<meter>(1000.0),
     ));
     let rocket = TheRocket::new(config.clone(), waypoint);
 
@@ -122,13 +122,12 @@ fn run_simulation() {
 
     // Add a realistic breeze
     twin.config.environment.wind_velocity = Vector3::new(
-        uom::si::f64::Velocity::new::<meter_per_second>(3.0),
-        uom::si::f64::Velocity::new::<meter_per_second>(1.5),
-        uom::si::f64::Velocity::new::<meter_per_second>(0.0),
+        Velocity::new::<meter_per_second>(3.0),
+        Velocity::new::<meter_per_second>(1.5),
+        Velocity::new::<meter_per_second>(0.0),
     );
     // Add mild atmospheric turbulence
-    twin.config.environment.turbulence_intensity =
-        uom::si::f64::Velocity::new::<meter_per_second>(1.2);
+    twin.config.environment.turbulence_intensity = Velocity::new::<meter_per_second>(1.2);
 
     let mut last_frame_time = Instant::now();
     let mut last_print_time = Instant::now();
@@ -197,7 +196,7 @@ fn main() {
     let args = Args::parse();
 
     if args.tune {
-        let config = get_default_config();
+        let config = get_rocket_design();
         let target = Vector3::new(1000.0, 1000.0, 1000.0);
         tuner::tune_pi(&config, target, args.dt, args.epochs);
     } else {
