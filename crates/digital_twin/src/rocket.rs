@@ -8,30 +8,30 @@ use uom::si::time::second;
 use uom::si::velocity::meter_per_second;
 
 #[derive(Debug, Clone)]
-pub struct Pi {
+pub struct Pid {
     pub kp: f64,
     pub ki: f64,
+    pub kd: f64,
     pub integral: f64,
+    pub prev_error: f64,
 }
 
-impl Pi {
-    pub fn new(kp: f64, ki: f64) -> Self {
+impl Pid {
+    pub fn new(kp: f64, ki: f64, kd: f64) -> Self {
         Self {
             kp,
             ki,
+            kd,
             integral: 0.0,
+            prev_error: 0.0,
         }
     }
 
-    pub fn update(&mut self, error: f64, new_kp: f64, new_ki: f64, dt: f64) -> f64 {
+    pub fn update(&mut self, error: f64, new_kp: f64, new_ki: f64, new_kd: f64, dt: f64) -> f64 {
         if dt <= 0.0 {
             return 0.0;
         }
 
-        // Anti-Windup / Gain Scheduling integral sum scaling
-        // If Ki changes significantly, scale the accumulated integral
-        // so that the total integral effort (ki * integral) remains continuous.
-        // Prevent division by zero if ki was previously zero.
         if self.ki > 1e-6 && new_ki > 1e-6 && (self.ki - new_ki).abs() > 1e-4 {
             self.integral *= self.ki / new_ki;
         } else if new_ki <= 1e-6 {
@@ -40,10 +40,13 @@ impl Pi {
 
         self.kp = new_kp;
         self.ki = new_ki;
+        self.kd = new_kd;
 
         self.integral += error * dt;
+        let derivative = (error - self.prev_error) / dt;
+        self.prev_error = error;
 
-        (self.kp * error) + (self.ki * self.integral)
+        (self.kp * error) + (self.ki * self.integral) + (self.kd * derivative)
     }
 }
 
@@ -52,28 +55,30 @@ impl Pi {
 pub struct FlightComputer {
     pub config: MissileConfig,
     pub time: f64,
-    pub pitch_pi: Pi,
-    pub yaw_pi: Pi,
+    pub pitch_pid: Pid,
+    pub yaw_pid: Pid,
     pub target_waypoint: Option<Vector3<Length>>,
 }
 
 impl FlightComputer {
     pub fn new(config: MissileConfig, target_waypoint: Option<Vector3<Length>>) -> Self {
         let current_time = Time::new::<second>(0.0);
-        let pitch_pi = Pi::new(
+        let pitch_pid = Pid::new(
             config.controller.current_pitch_kp(current_time),
             config.controller.current_pitch_ki(current_time),
+            config.controller.current_pitch_kd(current_time),
         );
-        let yaw_pi = Pi::new(
+        let yaw_pid = Pid::new(
             config.controller.current_yaw_kp(current_time),
             config.controller.current_yaw_ki(current_time),
+            config.controller.current_yaw_kd(current_time),
         );
 
         Self {
             config,
             time: 0.0,
-            pitch_pi,
-            yaw_pi,
+            pitch_pid,
+            yaw_pid,
             target_waypoint,
         }
     }
@@ -93,17 +98,19 @@ impl FlightComputer {
         // 2. Schedule PI gains and update controllers
         let current_time = Time::new::<second>(self.time);
 
-        let pitch_cmd = self.pitch_pi.update(
+        let pitch_cmd = self.pitch_pid.update(
             error_pitch,
             self.config.controller.current_pitch_kp(current_time),
             self.config.controller.current_pitch_ki(current_time),
+            self.config.controller.current_pitch_kd(current_time),
             dt,
         );
 
-        let yaw_cmd = self.yaw_pi.update(
+        let yaw_cmd = self.yaw_pid.update(
             error_yaw,
             self.config.controller.current_yaw_kp(current_time),
             self.config.controller.current_yaw_ki(current_time),
+            self.config.controller.current_yaw_kd(current_time),
             dt,
         );
 
@@ -326,16 +333,16 @@ mod tests {
 
     #[test]
     fn pi_proportional_response() {
-        let mut pi = Pi::new(2.0, 0.0);
-        let cmd = pi.update(5.0, 2.0, 0.0, 0.1);
+        let mut pid = Pid::new(2.0, 0.0, 0.0);
+        let cmd = pid.update(5.0, 2.0, 0.0, 0.0, 0.1);
         assert!((cmd - 10.0).abs() < 1e-6, "P control failed");
     }
 
     #[test]
     fn pi_integral_response() {
-        let mut pi = Pi::new(0.0, 2.0);
-        pi.update(5.0, 0.0, 2.0, 0.1); // error * dt * ki = 5 * 0.1 * 2 = 1.0
-        let cmd1 = pi.update(5.0, 0.0, 2.0, 0.1); // integral becomes 1.0 + 1.0 = 2.0
+        let mut pid = Pid::new(0.0, 2.0, 0.0);
+        pid.update(5.0, 0.0, 2.0, 0.0, 0.1); // error * dt * ki = 5 * 0.1 * 2 = 1.0
+        let cmd1 = pid.update(5.0, 0.0, 2.0, 0.0, 0.1); // integral becomes 1.0 + 1.0 = 2.0
         assert!((cmd1 - 2.0).abs() < 1e-6, "I control failed");
     }
 
@@ -413,8 +420,8 @@ mod tests {
         let mut config = get_default_config();
         let state = get_initial_state(&config);
         // Give some PI values to ensure commands are generated
-        config.controller.pitch_pi_kp = vec![(Time::new::<second>(0.0), 1.0)];
-        config.controller.yaw_pi_kp = vec![(Time::new::<second>(0.0), 1.0)];
+        config.controller.pitch_pid_kp = vec![(Time::new::<second>(0.0), 1.0)];
+        config.controller.yaw_pid_kp = vec![(Time::new::<second>(0.0), 1.0)];
 
         let waypoint = Some(Vector3::new(
             Length::new::<meter>(500.0), // Off to the side in +X
@@ -452,7 +459,7 @@ mod tests {
 
         let state = get_initial_state(&config);
 
-        config.controller.pitch_pi_kp = vec![(Time::new::<second>(0.0), 100.0)]; // ensure large command
+        config.controller.pitch_pid_kp = vec![(Time::new::<second>(0.0), 100.0)]; // ensure large command
 
         let waypoint = Some(Vector3::new(
             Length::new::<meter>(0.0),
@@ -485,7 +492,7 @@ mod tests {
 
         let state = get_initial_state(&config);
 
-        config.controller.pitch_pi_kp = vec![(Time::new::<second>(0.0), 10.0)];
+        config.controller.pitch_pid_kp = vec![(Time::new::<second>(0.0), 10.0)];
 
         let waypoint = Some(Vector3::new(
             Length::new::<meter>(0.0),

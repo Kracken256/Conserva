@@ -149,10 +149,12 @@ pub fn get_default_config() -> MissileConfig {
             ],
         },
         controller: MissileControllerConfig {
-            pitch_pi_kp: vec![(Time::new::<second>(0.0), 0.642419)],
-            pitch_pi_ki: vec![(Time::new::<second>(0.0), 0.000000)],
-            yaw_pi_kp: vec![(Time::new::<second>(0.0), 0.642419)],
-            yaw_pi_ki: vec![(Time::new::<second>(0.0), 0.000000)],
+            pitch_pid_kp: vec![(Time::new::<second>(0.0), 0.642419)],
+            pitch_pid_ki: vec![(Time::new::<second>(0.0), 0.000000)],
+            pitch_pid_kd: vec![(Time::new::<second>(0.0), 0.05)],
+            yaw_pid_kp: vec![(Time::new::<second>(0.0), 0.642419)],
+            yaw_pid_ki: vec![(Time::new::<second>(0.0), 0.000000)],
+            yaw_pid_kd: vec![(Time::new::<second>(0.0), 0.05)],
         },
         engine: MissileEngineConfig {
             motor_impulse_curve: vec![

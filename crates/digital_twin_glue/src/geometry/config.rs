@@ -214,25 +214,27 @@ pub struct MissileControllerConfig {
     /// how aggressively the controller immediately applies correcting moments relative to the
     /// absolute current pitch error scale. High values quicken responsiveness but run the risk of
     /// triggering severe oscillations.
-    pub pitch_pi_kp: Vec<(Time, f64)>,
+    pub pitch_pid_kp: Vec<(Time, f64)>,
 
     /// The integral gain tuning constant for the automated pitch control loop. It aggregates and
     /// counters accumulated error histories to wash out steady-state offsets—like persistent
     /// gravity sag. However, an excessively large value often manifests as delayed overshoots and
     /// integral windups.
-    pub pitch_pi_ki: Vec<(Time, f64)>,
+    pub pitch_pid_ki: Vec<(Time, f64)>,
+    pub pitch_pid_kd: Vec<(Time, f64)>,
 
     /// The unscaled proportional gain factor controlling the horizontal thrust vector control and
     /// fin yaw loop. It produces immediate physical reactions when the current telemetry heading
     /// deviates from the navigational target heading. Proper tuning tightens flight tracking
     /// capabilities against active lateral constraints.
-    pub yaw_pi_kp: Vec<(Time, f64)>,
+    pub yaw_pid_kp: Vec<(Time, f64)>,
 
     /// The foundational integral multiplier backing the horizontal yaw control loop tuning. It
     /// steadily ramps up correction commands if the heading persistently lingers off-band due to
     /// unresolved continuous disturbances. This function acts primarily to negate sustained
     /// environmental crosswinds over an extended trajectory.
-    pub yaw_pi_ki: Vec<(Time, f64)>,
+    pub yaw_pid_ki: Vec<(Time, f64)>,
+    pub yaw_pid_kd: Vec<(Time, f64)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -709,21 +711,30 @@ impl MissileControllerConfig {
 
     /// Linearly interpolates the scheduled pitch Kp gain based on flight time.
     pub fn current_pitch_kp(&self, time: Time) -> f64 {
-        Self::interpolate_gain(&self.pitch_pi_kp, time)
+        Self::interpolate_gain(&self.pitch_pid_kp, time)
     }
 
     /// Linearly interpolates the scheduled pitch Ki gain based on flight time.
     pub fn current_pitch_ki(&self, time: Time) -> f64 {
-        Self::interpolate_gain(&self.pitch_pi_ki, time)
+        Self::interpolate_gain(&self.pitch_pid_ki, time)
     }
 
     /// Linearly interpolates the scheduled yaw Kp gain based on flight time.
     pub fn current_yaw_kp(&self, time: Time) -> f64 {
-        Self::interpolate_gain(&self.yaw_pi_kp, time)
+        Self::interpolate_gain(&self.yaw_pid_kp, time)
     }
 
     /// Linearly interpolates the scheduled yaw Ki gain based on flight time.
     pub fn current_yaw_ki(&self, time: Time) -> f64 {
-        Self::interpolate_gain(&self.yaw_pi_ki, time)
+        Self::interpolate_gain(&self.yaw_pid_ki, time)
+    }
+}
+
+impl MissileControllerConfig {
+    pub fn current_pitch_kd(&self, time: Time) -> f64 {
+        Self::interpolate_gain(&self.pitch_pid_kd, time)
+    }
+    pub fn current_yaw_kd(&self, time: Time) -> f64 {
+        Self::interpolate_gain(&self.yaw_pid_kd, time)
     }
 }

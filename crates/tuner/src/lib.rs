@@ -12,26 +12,42 @@ use uom::si::velocity::meter_per_second;
 
 #[derive(Clone, Debug)]
 struct Wolf {
-    gains: [f64; 2], // [Kp, Ki]
+    // 3 phases * 3 gains (P, I, D) = 9 dimensions total
+    gains: [f64; 9],
     score: f64,
 }
 
+const STAGES: [f64; 3] = [0.0, 5.2, 10.4];
+
 /// Professional-grade cost function for missile GNC optimization.
-fn evaluate_pi(
+fn evaluate_pid(
     base_config: &MissileConfig,
     target: Vector3<f64>,
-    kp: f64,
-    ki: f64,
+    gains: &[f64; 9],
     max_time: f64,
     dt: f64,
 ) -> f64 {
     let mut config = base_config.clone();
-    let t0 = Time::new::<second>(0.0);
+
+    let mut kp_curve = Vec::new();
+    let mut ki_curve = Vec::new();
+    let mut kd_curve = Vec::new();
+
+    for (i, &time) in STAGES.iter().enumerate() {
+        let t = Time::new::<second>(time);
+        kp_curve.push((t, gains[i * 3]));
+        ki_curve.push((t, gains[i * 3 + 1]));
+        kd_curve.push((t, gains[i * 3 + 2]));
+    }
+
     // Symmetric tuning for Pitch and Yaw axes
-    config.controller.pitch_pi_kp = vec![(t0, kp)];
-    config.controller.pitch_pi_ki = vec![(t0, ki)];
-    config.controller.yaw_pi_kp = vec![(t0, kp)];
-    config.controller.yaw_pi_ki = vec![(t0, ki)];
+    config.controller.pitch_pid_kp = kp_curve.clone();
+    config.controller.pitch_pid_ki = ki_curve.clone();
+    config.controller.pitch_pid_kd = kd_curve.clone();
+
+    config.controller.yaw_pid_kp = kp_curve;
+    config.controller.yaw_pid_ki = ki_curve;
+    config.controller.yaw_pid_kd = kd_curve;
 
     let state = get_initial_state(&config);
 
@@ -102,7 +118,10 @@ fn evaluate_pi(
             let v_norm = world_vel.norm().max(0.001);
             let alignment = 1.0 - (world_vel.dot(&error_vec) / (v_norm * dist)).clamp(-1.0, 1.0);
             let alignment_penalty = alignment * 10000.0;
-            let gain_reg = (kp * 1.0) + (ki * 0.1);
+
+            // Need a metric to prevent excessive gains
+            let gain_reg: f64 = gains.iter().sum::<f64>() * 0.1;
+
             return total_cost + (time * 10.0) + alignment_penalty + gain_reg;
         }
     }
@@ -119,42 +138,24 @@ fn gwo_update(target_gain: f64, current_gain: f64, a: f64, rng: &mut impl Rng) -
     target_gain - a_vec * d
 }
 
-fn tune_frozen_stage(
-    stage_time: f64,
-    stage_name: &str,
-    base_config: &MissileConfig,
-    target: Vector3<f64>,
-    dt: f64,
-    iterations: usize,
-) -> [f64; 2] {
-    let mut config = base_config.clone();
-    let sample_time = Time::new::<second>(stage_time);
-    
-    // Freeze the physics properties at this specific time step
-    let initial_mass = config.mass.current_mass(sample_time);
-    let initial_cg = config.geometry.current_cg(sample_time);
-    let initial_inertia = config.mass.current_inertia_tensor(sample_time);
-    
-    config.mass.mass_curve = vec![(Time::new::<second>(0.0), initial_mass)];
-    config.geometry.cg_curve = vec![(Time::new::<second>(0.0), initial_cg)];
-    config.mass.inertia_tensor_curve = vec![(Time::new::<second>(0.0), initial_inertia)];
+pub fn tune_pi(base_config: &MissileConfig, target: Vector3<f64>, dt: f64, iterations: usize) {
+    println!("Starting Holistic Global Tuning Optimizer with dt = {}", dt);
 
     let num_wolves = 100;
-    let bounds_max = [1.0, 1.0];
-
-    println!(
-        "\n--- Tuning Stage: {} (t={}s) ---",
-        stage_name, stage_time
-    );
+    // kp, ki, kd bounds per stage
+    let bounds_max = [1.0, 0.5, 0.2];
 
     let mut population: Vec<Wolf> = (0..num_wolves)
         .map(|_| {
             let mut rng = rand::thread_rng();
+            let mut gains = [0.0; 9];
+            for i in 0..3 {
+                gains[i * 3] = rng.gen_range(0.0..bounds_max[0]);
+                gains[i * 3 + 1] = rng.gen_range(0.0..bounds_max[1]);
+                gains[i * 3 + 2] = rng.gen_range(0.0..bounds_max[2]);
+            }
             Wolf {
-                gains: [
-                    rng.gen_range(0.0..bounds_max[0]),
-                    rng.gen_range(0.0..bounds_max[1]),
-                ],
+                gains,
                 score: f64::MAX,
             }
         })
@@ -167,95 +168,140 @@ fn tune_frozen_stage(
     let pb = ProgressBar::new(iterations as u64);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("[{elapsed_precise} < {eta_precise}] [{bar:40.cyan/blue}] {pos}/{len} | {msg}")
+            .template(
+                "[{elapsed_precise} < {eta_precise}] [{bar:40.cyan/blue}] {pos}/{len} | {msg}",
+            )
             .unwrap(),
     );
 
     for iter in 0..iterations {
         population.par_iter_mut().for_each(|wolf| {
-            // max_time can be shorter for frozen tuning since it's an instantaneous response check
-            wolf.score = evaluate_pi(&config, target, wolf.gains[0], wolf.gains[1], 15.0, dt);
+            let cost = evaluate_pid(base_config, target, &wolf.gains, 30.0, dt);
+
+            // 3. Gain Scheduling Continuity Penalty
+            let mut continuity_penalty = 0.0;
+            for i in 0..2 {
+                let p_diff = (wolf.gains[(i + 1) * 3] - wolf.gains[i * 3]).abs();
+                let i_diff = (wolf.gains[(i + 1) * 3 + 1] - wolf.gains[i * 3 + 1]).abs();
+                let d_diff = (wolf.gains[(i + 1) * 3 + 2] - wolf.gains[i * 3 + 2]).abs();
+                continuity_penalty += (p_diff * 100.0) + (i_diff * 100.0) + (d_diff * 100.0);
+            }
+
+            // 4. Robust/Stochastic Tuning (Monte Carlo) Variant
+            // Running variations with different target vector offsets
+            let offset_target = target + Vector3::new(10.0, 0.0, 10.0);
+            let cost_var = evaluate_pid(base_config, offset_target, &wolf.gains, 30.0, dt);
+            let max_cost = cost.max(cost_var);
+
+            wolf.score = max_cost + continuity_penalty;
         });
 
         population.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap());
 
-        if population[0].score < alpha.score { alpha = population[0].clone(); }
-        if population[1].score < beta.score { beta = population[1].clone(); }
-        if population[2].score < delta.score { delta = population[2].clone(); }
+        if population[0].score < alpha.score {
+            alpha = population[0].clone();
+        }
+        if population[1].score < beta.score {
+            beta = population[1].clone();
+        }
+        if population[2].score < delta.score {
+            delta = population[2].clone();
+        }
 
         let a = 2.0 * (1.0 - (iter as f64 / iterations as f64));
 
         population.par_iter_mut().for_each(|wolf| {
             let mut rng = rand::thread_rng();
-            let mut next_gains = [0.0; 2];
+            let mut next_gains = [0.0; 9];
 
-            for i in 0..2 {
+            for i in 0..9 {
+                let bound_idx = i % 3;
                 let x1 = gwo_update(alpha.gains[i], wolf.gains[i], a, &mut rng);
                 let x2 = gwo_update(beta.gains[i], wolf.gains[i], a, &mut rng);
                 let x3 = gwo_update(delta.gains[i], wolf.gains[i], a, &mut rng);
-                next_gains[i] = ((x1 + x2 + x3) / 3.0).clamp(0.0, bounds_max[i]);
+                next_gains[i] = ((x1 + x2 + x3) / 3.0).clamp(0.0, bounds_max[bound_idx]);
             }
             wolf.gains = next_gains;
         });
 
         pb.inc(1);
-        pb.set_message(format!(
-            "Score: {:.2} | [P:{:.6} I:{:.6}]",
-            alpha.score, alpha.gains[0], alpha.gains[1]
-        ));
+        pb.set_message(format!("Best Cost: {:.2}", alpha.score));
     }
 
     pb.finish();
-    println!("Stage Optimal Gains: Kp={:.6}, Ki={:.6}", alpha.gains[0], alpha.gains[1]);
-    alpha.gains
-}
 
-pub fn tune_pi(base_config: &MissileConfig, target: Vector3<f64>, dt: f64, iterations: usize) {
-    println!("Starting Gain Scheduling Optimizer with dt = {}", dt);
-    
-    let stages = vec![
-        (0.0, "Ignition (Wet)"),
-        (5.2, "Mid-burn"),
-        (10.4, "Burnout (Dry)"),
-    ];
-
-    let mut scheduled_gains = Vec::new();
-
-    for (time, name) in stages {
-        let best_gains = tune_frozen_stage(time, name, base_config, target, dt, iterations);
-        scheduled_gains.push((time, best_gains));
-    }
-
-    println!("\n=============================================");
+    println!(
+        "
+============================================="
+    );
     println!("FINAL GAIN SCHEDULING LOOKUP TABLE (Copy to defaults.rs)");
     println!("=============================================");
-    
+
     println!("        controller: MissileControllerConfig {{");
-    
-    print!("            pitch_pi_kp: vec![");
-    for (t, gains) in &scheduled_gains {
-        print!("(Time::new::<second>({:.1}), {:.6}), ", t, gains[0]);
+
+    print!("            pitch_pid_kp: vec![");
+    for i in 0..3 {
+        print!(
+            "(Time::new::<second>({:.1}), {:.6}), ",
+            STAGES[i],
+            alpha.gains[i * 3]
+        );
     }
     println!("],");
 
-    print!("            pitch_pi_ki: vec![");
-    for (t, gains) in &scheduled_gains {
-        print!("(Time::new::<second>({:.1}), {:.6}), ", t, gains[1]);
+    print!("            pitch_pid_ki: vec![");
+    for i in 0..3 {
+        print!(
+            "(Time::new::<second>({:.1}), {:.6}), ",
+            STAGES[i],
+            alpha.gains[i * 3 + 1]
+        );
     }
     println!("],");
 
-    print!("            yaw_pi_kp: vec![");
-    for (t, gains) in &scheduled_gains {
-        print!("(Time::new::<second>({:.1}), {:.6}), ", t, gains[0]);
+    print!("            pitch_pid_kd: vec![");
+    for i in 0..3 {
+        print!(
+            "(Time::new::<second>({:.1}), {:.6}), ",
+            STAGES[i],
+            alpha.gains[i * 3 + 2]
+        );
     }
     println!("],");
 
-    print!("            yaw_pi_ki: vec![");
-    for (t, gains) in &scheduled_gains {
-        print!("(Time::new::<second>({:.1}), {:.6}), ", t, gains[1]);
+    print!("            yaw_pid_kp: vec![");
+    for i in 0..3 {
+        print!(
+            "(Time::new::<second>({:.1}), {:.6}), ",
+            STAGES[i],
+            alpha.gains[i * 3]
+        );
     }
     println!("],");
-    
+
+    print!("            yaw_pid_ki: vec![");
+    for i in 0..3 {
+        print!(
+            "(Time::new::<second>({:.1}), {:.6}), ",
+            STAGES[i],
+            alpha.gains[i * 3 + 1]
+        );
+    }
+    println!("],");
+
+    print!("            yaw_pid_kd: vec![");
+    for i in 0..3 {
+        print!(
+            "(Time::new::<second>({:.1}), {:.6}), ",
+            STAGES[i],
+            alpha.gains[i * 3 + 2]
+        );
+    }
+    println!("],");
+
     println!("        }},");
-    println!("=============================================\n");
+    println!(
+        "=============================================
+"
+    );
 }
