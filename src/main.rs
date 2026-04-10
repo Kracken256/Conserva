@@ -105,15 +105,15 @@ fn main() {
 
     let mut twin = DigitalTwin::new(config, state, Box::new(mesh_generator), Box::new(rocket));
 
-    // Add strong crosswind to test control stability (e.g. 25 m/s or ~55 mph)
+    // Add a realistic breeze
     twin.config.environment.wind_velocity = Vector3::new(
-        uom::si::f64::Velocity::new::<meter_per_second>(25.0),
-        uom::si::f64::Velocity::new::<meter_per_second>(-10.0),
+        uom::si::f64::Velocity::new::<meter_per_second>(3.0),
+        uom::si::f64::Velocity::new::<meter_per_second>(1.5),
         uom::si::f64::Velocity::new::<meter_per_second>(0.0),
     );
-    // Add significant atmospheric turbulence scaling
+    // Add mild atmospheric turbulence
     twin.config.environment.turbulence_intensity =
-        uom::si::f64::Velocity::new::<meter_per_second>(15.0);
+        uom::si::f64::Velocity::new::<meter_per_second>(1.2);
 
     let mut last_frame_time = Instant::now();
     let mut last_print_time = Instant::now();
@@ -144,7 +144,7 @@ fn main() {
             let distance = (dx * dx + dy * dy + dz * dz).sqrt();
 
             // Break the simulation loop if we are within a reasonable proximity radius (e.g., 20 meters)
-            if distance < 20.0 {
+            if distance < 4.0 {
                 println!(
                     "\n[SIMULATION STOPPED] Target hit! Final distance: {:.2} meters",
                     distance
