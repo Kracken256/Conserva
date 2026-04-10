@@ -10,7 +10,7 @@ use uom::si::velocity::meter_per_second;
 fn main() -> std::io::Result<()> {
     let config = get_default_config();
     let mesh_generator = TheMeshGenerator::default();
-    let body_length = config.geometry.body_length.get::<meter>();
+    let body_length = config.geometry.cylindrical_body_length.get::<meter>();
 
     println!("Exporting center of pressure curve...");
     let mut cp_file = File::create("cp_curve.csv")?;

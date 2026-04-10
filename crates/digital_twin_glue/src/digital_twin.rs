@@ -98,7 +98,7 @@ impl DigitalTwin {
 
                 // Fetch dynamic Center of Gravity (CoG) from curve
                 let cg = self.config.geometry.current_cg(sub_state.time);
-                let body_length = self.config.geometry.body_length.get::<meter>();
+                let body_length = self.config.geometry.cylindrical_body_length.get::<meter>();
 
                 // Introduce rotational torque from off-axis thrust relative to current CoG
                 // Nozzle is at the base of the rocket (-body_length/2.0 from geometric center)

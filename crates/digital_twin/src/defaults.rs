@@ -63,7 +63,7 @@ pub fn get_default_config() -> MissileConfig {
                 blunting_radius: None,
                 secant_radius: None,
             },
-            body_length: Length::new::<meter>(1.4),
+            cylindrical_body_length: Length::new::<meter>(1.4),
             diameter: Length::new::<meter>(0.1),
             fin_offset_from_nose: Length::new::<meter>(1.2),
             fin_chord_length: Length::new::<meter>(0.2),

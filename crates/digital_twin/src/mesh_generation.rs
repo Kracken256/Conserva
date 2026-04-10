@@ -8,7 +8,7 @@ pub struct TheMeshGenerator {}
 impl MeshGenerator for TheMeshGenerator {
     fn generate(&self, state: &MissileState, config: &MissileConfig, mesh: &mut Mesh) {
         let radius = config.geometry.diameter.get::<meter>() / 2.0;
-        let body_length = config.geometry.body_length.get::<meter>();
+        let body_length = config.geometry.cylindrical_body_length.get::<meter>();
 
         // Fetch dynamic Center of Gravity (CoG) from curve
         let cg = config.geometry.current_cg(state.time);
@@ -406,7 +406,7 @@ mod tests {
             .map(|v| v.z)
             .fold(f64::INFINITY, f64::min);
         let calculated_length = max_z - min_z;
-        let expected_length = config.geometry.body_length.value;
+        let expected_length = config.geometry.cylindrical_body_length.value;
 
         // Allow a tiny floating-point margin
         assert!(

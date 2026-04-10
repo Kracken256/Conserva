@@ -63,7 +63,7 @@ pub struct MissileGeometryConfig {
     /// The total length of the main cylindrical body of the missile. It defines the primary
     /// aerodynamic acting surface and total volume. This measurement actively dictates the
     /// dimensional space available for the payload, electronics, and propellant.
-    pub body_length: Length,
+    pub cylindrical_body_length: Length,
     /// The maximum diameter of the missile's main body tube. This measurement bounds the internal
     /// volume and dictates the frontal reference area utilized in aerodynamic drag estimations. It
     /// restricts component sizing throughout the chassis.
@@ -350,7 +350,7 @@ mod tests {
                 blunting_radius: None,
                 secant_radius: None,
             },
-            body_length: Length::new::<meter>(1.0),
+            cylindrical_body_length: Length::new::<meter>(1.0),
             diameter: Length::new::<meter>(0.1),
             fin_offset_from_nose: Length::new::<meter>(0.9),
             fin_chord_length: Length::new::<meter>(0.1),
