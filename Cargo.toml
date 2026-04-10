@@ -16,6 +16,8 @@ edition = "2024"
 [dependencies]
 digital_twin_glue = { path = "crates/digital_twin_glue" }
 digital_twin = { path = "crates/digital_twin" }
+tuner = { path = "crates/tuner" }
 nalgebra = "0.34"
 uom = { version = "0.38.0", features = ["serde"] }
 serde_json = { version = "1.0.149", features = ["preserve_order"] }
+clap = { version = "=4.5.4", features = ["derive"] }

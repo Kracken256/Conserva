@@ -1,3 +1,4 @@
+use clap::Parser;
 use digital_twin::prelude::*;
 use digital_twin_glue::prelude::*;
 use nalgebra::Vector3;
@@ -83,8 +84,22 @@ fn write_state_json(flight_file: &mut File, state: &MissileState, first_json_ent
     *first_json_entry = false;
 }
 
-fn main() {
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg(long)]
+    tune: bool,
+
+    #[arg(long, default_value_t = 0.01)]
+    dt: f64,
+
+    #[arg(long, default_value_t = 300)]
+    epochs: usize,
+}
+
+fn run_simulation() {
     let config = get_default_config();
+
     let state = get_initial_state(&config);
     let mesh_generator = TheMeshGenerator::default();
 
@@ -176,4 +191,15 @@ fn main() {
 
     write_state_json(&mut flight_file, &twin.state, &mut first_json_entry);
     writeln!(flight_file, "\n]").expect("Failed to write array end");
+}
+
+fn main() {
+    let args = Args::parse();
+
+    if args.tune {
+        let config = get_default_config();
+        tuner::tune_pi(&config, args.dt, args.epochs);
+    } else {
+        run_simulation();
+    }
 }
