@@ -14,7 +14,7 @@ pub fn get_initial_state(config: &MissileConfig) -> MissileState {
         position: [
             Length::new::<meter>(0.0),
             Length::new::<meter>(0.0),
-            Length::new::<meter>(500.0),
+            Length::new::<meter>(10.0),
         ]
         .into(),
         body_velocity: [
