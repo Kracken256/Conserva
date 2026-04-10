@@ -41,8 +41,8 @@ pub fn get_initial_state(config: &MissileConfig) -> MissileState {
 
 pub fn get_default_config() -> MissileConfig {
     MissileConfig {
-            environment: EnvironmentalConfig::default(),
-            mass: MissileMassConfig {
+        environment: EnvironmentalConfig::default(),
+        mass: MissileMassConfig {
             dry_mass: Mass::new::<kilogram>(40.0),
             wet_mass: Mass::new::<kilogram>(140.0),
             mass_curve: vec![
@@ -106,12 +106,12 @@ pub fn get_default_config() -> MissileConfig {
             ],
         },
         controller: MissileControllerConfig {
-            pitch_pid_kp: 0.264091,
-            pitch_pid_ki: 0.100000,
-            pitch_pid_kd: 0.000000,
-            yaw_pid_kp: 0.264091,
-            yaw_pid_ki: 0.100000,
-            yaw_pid_kd: 0.000000,
+            pitch_pid_kp: 0.36,
+            pitch_pid_ki: 0.4,
+            pitch_pid_kd: 0.0,
+            yaw_pid_kp: 0.36,
+            yaw_pid_ki: 0.4,
+            yaw_pid_kd: 0.0,
         },
         engine: MissileEngineConfig {
             motor_impulse_curve: vec![

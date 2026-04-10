@@ -143,8 +143,8 @@ fn main() {
             let dz = wp[2].get::<meter>() - twin.state.position[2].get::<meter>();
             let distance = (dx * dx + dy * dy + dz * dz).sqrt();
 
-            // Break the simulation loop if we are within a reasonable proximity radius (e.g., 20 meters)
-            if distance < 4.0 {
+            // Break the simulation loop if we are within a reasonable proximity radius
+            if distance < 0.2 {
                 println!(
                     "\n[SIMULATION STOPPED] Target hit! Final distance: {:.2} meters",
                     distance
