@@ -149,12 +149,36 @@ pub fn get_default_config() -> MissileConfig {
             ],
         },
         controller: MissileControllerConfig {
-            pitch_pid_kp: vec![(Time::new::<second>(0.0), 0.642419)],
-            pitch_pid_ki: vec![(Time::new::<second>(0.0), 0.000000)],
-            pitch_pid_kd: vec![(Time::new::<second>(0.0), 0.05)],
-            yaw_pid_kp: vec![(Time::new::<second>(0.0), 0.642419)],
-            yaw_pid_ki: vec![(Time::new::<second>(0.0), 0.000000)],
-            yaw_pid_kd: vec![(Time::new::<second>(0.0), 0.05)],
+            pitch_pid_kp: vec![
+                (Time::new::<second>(0.0), 0.394328),
+                (Time::new::<second>(5.2), 1.000000),
+                (Time::new::<second>(10.4), 1.000000),
+            ],
+            pitch_pid_ki: vec![
+                (Time::new::<second>(0.0), 0.000000),
+                (Time::new::<second>(5.2), 0.000004),
+                (Time::new::<second>(10.4), 0.043678),
+            ],
+            pitch_pid_kd: vec![
+                (Time::new::<second>(0.0), 0.200000),
+                (Time::new::<second>(5.2), 0.195222),
+                (Time::new::<second>(10.4), 0.190997),
+            ],
+            yaw_pid_kp: vec![
+                (Time::new::<second>(0.0), 0.394328),
+                (Time::new::<second>(5.2), 1.000000),
+                (Time::new::<second>(10.4), 1.000000),
+            ],
+            yaw_pid_ki: vec![
+                (Time::new::<second>(0.0), 0.000000),
+                (Time::new::<second>(5.2), 0.000004),
+                (Time::new::<second>(10.4), 0.043678),
+            ],
+            yaw_pid_kd: vec![
+                (Time::new::<second>(0.0), 0.200000),
+                (Time::new::<second>(5.2), 0.195222),
+                (Time::new::<second>(10.4), 0.190997),
+            ],
         },
         engine: MissileEngineConfig {
             motor_impulse_curve: vec![
