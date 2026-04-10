@@ -66,7 +66,11 @@ impl DigitalTwin {
                 sub_state.angular_velocity = w.map(AngularVelocity::new::<radian_per_second>);
                 sub_state.orientation = UnitQuaternion::from_quaternion(q);
 
-                let turb_factor = self.config.environment.turbulence_intensity;
+                let turb_factor = self
+                    .config
+                    .environment
+                    .turbulence_intensity
+                    .get::<meter_per_second>();
                 let gust_x = turb_factor * ((t_sec * 2.1).sin() + 0.5 * (t_sec * 5.3 + 1.2).sin());
                 let gust_y =
                     turb_factor * ((t_sec * 1.7 + 2.0).sin() + 0.5 * (t_sec * 4.1 + 0.5).sin());

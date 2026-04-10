@@ -319,7 +319,7 @@ pub struct EnvironmentalConfig {
     /// A multiplicative scaling factor applied atop internal turbulent noise layers.
     /// Values above zero spawn chaotic high-frequency flutter reflecting violent, unresolved thermals tracking past.
     /// Setting this rigidly limits randomized flight path deviations strictly required for realistic tuning.
-    pub turbulence_intensity: f64,
+    pub turbulence_intensity: Velocity,
 }
 
 impl Default for EnvironmentalConfig {
@@ -331,7 +331,7 @@ impl Default for EnvironmentalConfig {
                 Velocity::new::<meter_per_second>(0.0),
                 Velocity::new::<meter_per_second>(0.0),
             ),
-            turbulence_intensity: 0.0,
+            turbulence_intensity: Velocity::new::<meter_per_second>(0.0),
         }
     }
 }

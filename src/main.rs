@@ -112,7 +112,8 @@ fn main() {
         uom::si::f64::Velocity::new::<meter_per_second>(0.0),
     );
     // Add significant atmospheric turbulence scaling
-    twin.config.environment.turbulence_intensity = 15.0;
+    twin.config.environment.turbulence_intensity =
+        uom::si::f64::Velocity::new::<meter_per_second>(15.0);
 
     let mut last_frame_time = Instant::now();
     let mut last_print_time = Instant::now();
