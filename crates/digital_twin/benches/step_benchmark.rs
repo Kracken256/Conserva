@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use digital_twin::prelude::*;
 use digital_twin_glue::prelude::*;
 use nalgebra::Vector3;
@@ -18,7 +18,7 @@ fn bench_step(c: &mut Criterion) {
 
     // Warm up the twin
     twin.step(0.01);
-    
+
     let mut group = c.benchmark_group("digital_twin");
     group.bench_function("step_0_01", |b| {
         b.iter(|| {
