@@ -5,7 +5,7 @@ mod rocket;
 
 pub mod prelude {
     pub use crate::digital_twin::DigitalTwin;
-    pub use crate::physics::{AeroSolver, SolverOutput, lookup_atmosphere};
+    pub use crate::physics::{SolverOutput, calculate_forces, lookup_atmosphere};
     pub use crate::rocket::configuration::{
         EnvironmentalConfig, FinEdgeProfile, FinGeometry, MissileConfig, MissileControllerConfig,
         MissileEngineConfig, MissileGeometryConfig, MissileMassConfig, NoseconeShape,

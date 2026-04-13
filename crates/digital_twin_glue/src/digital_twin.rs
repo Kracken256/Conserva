@@ -11,7 +11,6 @@ pub struct DigitalTwin {
     pub config: MissileConfig,
     pub state: MissileState,
     pub rocket: Box<dyn RocketCtrl>,
-    pub solver: AeroSolver,
     pub mesh_generator: Box<dyn MeshGenerator>,
     pub current_mesh: Mesh,
 }
@@ -26,7 +25,6 @@ impl DigitalTwin {
         Self {
             config,
             state,
-            solver: AeroSolver {},
             mesh_generator,
             rocket,
             current_mesh: Mesh::default(),
@@ -51,7 +49,7 @@ impl DigitalTwin {
 
                 // Apply wind as a relative velocity for aerodynamics
                 sub_state.body_velocity -= wind_body_vel;
-                let aero = self.solver.calculate_forces(
+                let aero = crate::physics::calculate_forces(
                     &self.current_mesh,
                     &sub_state,
                     air_density,

@@ -31,8 +31,6 @@ fn main() -> std::io::Result<()> {
 
     let cg_fixed = config.geometry.current_cg(fixed_time).z.get::<meter>();
 
-    let mut solver = digital_twin_glue::prelude::AeroSolver::default();
-
     let alpha = 2.0_f64.to_radians();
     let altitude = 500.0;
 
@@ -55,7 +53,7 @@ fn main() -> std::io::Result<()> {
         // Ensure altitude is realistic
         state.position.z = Length::new::<meter>(altitude);
 
-        let out = solver.calculate_forces(&mesh, &state, air_density, sos, dyn_viscosity);
+        let out = calculate_forces(&mesh, &state, air_density, sos, dyn_viscosity);
 
         let mut z_cp_mesh = 0.0;
         if out.force.x.abs() > 1e-6 {
