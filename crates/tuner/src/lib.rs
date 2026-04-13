@@ -51,10 +51,7 @@ fn evaluate_pid(
 
     let state = get_rocket_initial_state(&config);
 
-    let rocket = TheRocket::new(
-        config.clone(),
-        Some(target.map(|c| Length::new::<meter>(c))),
-    );
+    let rocket = TheRocket::new(config.clone(), Some(target.map(Length::new::<meter>)));
 
     let mut twin = DigitalTwin::new(
         config,

@@ -358,19 +358,19 @@ impl RocketMesh {
                     let curr_idx = fin_base_idx + k as u32 * 6;
 
                     // LE left chamfer panel
-                    mesh.indices.push(prev_idx + 0);
+                    mesh.indices.push(prev_idx);
                     mesh.indices.push(prev_idx + 1);
                     mesh.indices.push(curr_idx + 1);
-                    mesh.indices.push(prev_idx + 0);
+                    mesh.indices.push(prev_idx);
                     mesh.indices.push(curr_idx + 1);
-                    mesh.indices.push(curr_idx + 0);
+                    mesh.indices.push(curr_idx);
 
                     // LE right chamfer panel
                     mesh.indices.push(prev_idx + 2);
-                    mesh.indices.push(prev_idx + 0);
-                    mesh.indices.push(curr_idx + 0);
+                    mesh.indices.push(prev_idx);
+                    mesh.indices.push(curr_idx);
                     mesh.indices.push(prev_idx + 2);
-                    mesh.indices.push(curr_idx + 0);
+                    mesh.indices.push(curr_idx);
                     mesh.indices.push(curr_idx + 2);
 
                     // Left mid panel
@@ -411,7 +411,7 @@ impl RocketMesh {
             let tip_idx = fin_base_idx + (t_values.len() - 1) as u32 * 6;
 
             // Top LE wedge cap
-            mesh.indices.push(tip_idx + 0);
+            mesh.indices.push(tip_idx);
             mesh.indices.push(tip_idx + 1);
             mesh.indices.push(tip_idx + 2);
             // Top mid quad cap

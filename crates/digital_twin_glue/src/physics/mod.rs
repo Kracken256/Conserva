@@ -35,10 +35,10 @@ pub fn lookup_atmosphere(altitude: f64) -> (f64, f64, f64) {
         return (1e-12, 280.0, 1.3e-5);
     }
 
-    let alt = altitude.max(0.0).min(86000.0);
+    let alt = altitude.clamp(0.0, 86000.0);
 
     let mut layer = 0;
-    for i in 1..ISA_LAYERS.len() {
+    for (i, _) in ISA_LAYERS.iter().enumerate().skip(1) {
         if alt < ISA_LAYERS[i].0 {
             break;
         }
@@ -523,14 +523,14 @@ impl AeroSolver {
             let f_y = valid_mask.blend(fn_y + ft_y, f64x8::splat(0.0));
             let f_z = valid_mask.blend(fn_z + ft_z, f64x8::splat(0.0));
 
-            force_x = force_x + f_x;
-            force_y = force_y + f_y;
-            force_z = force_z + f_z;
+            force_x += f_x;
+            force_y += f_y;
+            force_z += f_z;
 
             let (t_x, t_y, t_z) = cross3(rx, ry, rz, f_x, f_y, f_z);
-            torque_x = torque_x + t_x;
-            torque_y = torque_y + t_y;
-            torque_z = torque_z + t_z;
+            torque_x += t_x;
+            torque_y += t_y;
+            torque_z += t_z;
         }
 
         let f_arr_x = force_x.to_array();

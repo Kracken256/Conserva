@@ -40,31 +40,33 @@ impl DigitalTwin {
         self.update_aerodynamic_mesh();
 
         let (air_density, speed_of_sound, dyn_viscosity) = self.lookup_current_atmosphere();
-        
+
         let t_sec = self.state.time.value;
         let mut sub_state = self.state.clone();
 
-        let physics_engine = |v: Vector3<f64>, w: Vector3<f64>, q: Quaternion<f64>, p: Vector3<f64>| {
-            Self::update_state_kinematics(&mut sub_state, p, v, w, q);
+        let physics_engine =
+            |v: Vector3<f64>, w: Vector3<f64>, q: Quaternion<f64>, p: Vector3<f64>| {
+                Self::update_state_kinematics(&mut sub_state, p, v, w, q);
 
-            let wind_body_vel = Self::compute_body_wind(&self.config, t_sec, &sub_state.orientation);
-            
-            // Apply wind as a relative velocity for aerodynamics
-            sub_state.body_velocity -= wind_body_vel;
-            let aero = self.solver.calculate_forces(
-                &self.current_mesh,
-                &sub_state,
-                air_density,
-                speed_of_sound,
-                dyn_viscosity,
-            );
-            // Restore absolute ground-relative velocity
-            sub_state.body_velocity += wind_body_vel;
+                let wind_body_vel =
+                    Self::compute_body_wind(&self.config, t_sec, &sub_state.orientation);
 
-            let (thrust, torque) = Self::compute_engine_dynamics(&self.config, &sub_state);
+                // Apply wind as a relative velocity for aerodynamics
+                sub_state.body_velocity -= wind_body_vel;
+                let aero = self.solver.calculate_forces(
+                    &self.current_mesh,
+                    &sub_state,
+                    air_density,
+                    speed_of_sound,
+                    dyn_viscosity,
+                );
+                // Restore absolute ground-relative velocity
+                sub_state.body_velocity += wind_body_vel;
 
-            (aero.force + thrust, aero.torque + torque)
-        };
+                let (thrust, torque) = Self::compute_engine_dynamics(&self.config, &sub_state);
+
+                (aero.force + thrust, aero.torque + torque)
+            };
 
         self.state = self.rk4.step(&self.state, physics_engine, dt);
     }
@@ -74,7 +76,8 @@ impl DigitalTwin {
     }
 
     fn update_aerodynamic_mesh(&mut self) {
-        self.mesh_generator.generate(&self.state, &self.config, &mut self.current_mesh);
+        self.mesh_generator
+            .generate(&self.state, &self.config, &mut self.current_mesh);
         self.current_mesh.compute_surface_properties();
     }
 
@@ -101,12 +104,18 @@ impl DigitalTwin {
         t_sec: f64,
         orientation: &UnitQuaternion<f64>,
     ) -> Vector3<Velocity> {
-        let turb_factor = config.environment.turbulence_intensity.get::<meter_per_second>();
+        let turb_factor = config
+            .environment
+            .turbulence_intensity
+            .get::<meter_per_second>();
         let gust_x = turb_factor * ((t_sec * 2.1).sin() + 0.5 * (t_sec * 5.3 + 1.2).sin());
         let gust_y = turb_factor * ((t_sec * 1.7 + 2.0).sin() + 0.5 * (t_sec * 4.1 + 0.5).sin());
         let gust_z = turb_factor * ((t_sec * 3.3 + 1.0).sin() * 0.3);
 
-        let base_wind = config.environment.wind_velocity.map(|v| v.get::<meter_per_second>());
+        let base_wind = config
+            .environment
+            .wind_velocity
+            .map(|v| v.get::<meter_per_second>());
         let total_wind = base_wind + Vector3::new(gust_x, gust_y, gust_z);
 
         // Convert world-frame wind to body-frame and compute relative airspeed

@@ -129,10 +129,10 @@ impl FlightComputer {
     /// If there is an active waypoint, instructs the system how fast it needs
     /// to rotate (pitch & yaw) to point its nose at the target.
     fn compute_target_rates(&self, state: &MissileState) -> (f64, f64) {
-        if let Some(waypoint) = self.target_waypoint {
-            if let Some(los_body) = self.calculate_los_body(state, &waypoint) {
-                return self.compute_rates_from_los(&los_body);
-            }
+        if let Some(waypoint) = self.target_waypoint
+            && let Some(los_body) = self.calculate_los_body(state, &waypoint)
+        {
+            return self.compute_rates_from_los(&los_body);
         }
         (0.0, 0.0)
     }
