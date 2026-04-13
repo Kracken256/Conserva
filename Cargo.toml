@@ -21,3 +21,7 @@ nalgebra = "0.34"
 uom = { version = "0.38.0", features = ["serde"] }
 serde_json = { version = "1.0.149", features = ["preserve_order"] }
 clap = { version = "=4.5.4", features = ["derive"] }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
