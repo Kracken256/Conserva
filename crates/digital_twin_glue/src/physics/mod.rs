@@ -203,14 +203,29 @@ impl AeroSolver {
                         ((upper - f64x8::splat(5.0)) / f64x8::splat(2.0)).max(f64x8::splat(0.0));
 
                     let beta_5 = f64x8::splat((25.0_f64 - 1.0).sqrt());
-                    let cp_newtonian = cos_theta * cos_theta * f64x8::splat(2.0);
+
+                    // Account for chemical dissociation at high Mach numbers (real gas effects)
+                    // For ideal gas (gamma=1.4), Newtonian Cp_max asymptotically approaches ~1.839.
+                    // Above Mach 8 (non-negligible dissociation), bonds break, lowering the
+                    // effective gamma, pushing Cp_max upwards toward ~1.93.
+                    let dissociation_effect = ((local_mach - f64x8::splat(8.0))
+                        / f64x8::splat(12.0))
+                    .max(f64x8::splat(0.0))
+                    .min(f64x8::splat(1.0));
+                    let cp_max = f64x8::splat(1.839) + (f64x8::splat(0.091) * dissociation_effect);
+
+                    let cp_newtonian = cos_theta * cos_theta * cp_max;
                     let cp_ackeret = (cos_theta * f64x8::splat(2.0)) / beta_5;
                     cp_ackeret * (f64x8::splat(1.0) - blend) + cp_newtonian * blend
                 },
                 |cos_theta, local_mach| {
                     let blend = ((local_mach - 5.0) / 2.0).clamp(0.0, 1.0);
                     let beta_5 = (25.0_f64 - 1.0).sqrt();
-                    let cp_newtonian = cos_theta * cos_theta * 2.0;
+
+                    let dissociation_effect = ((local_mach - 8.0) / 12.0).clamp(0.0, 1.0);
+                    let cp_max = 1.839 + 0.091 * dissociation_effect;
+
+                    let cp_newtonian = cos_theta * cos_theta * cp_max;
                     let cp_ackeret = (cos_theta * 2.0) / beta_5;
                     cp_ackeret * (1.0 - blend) + cp_newtonian * blend
                 },
