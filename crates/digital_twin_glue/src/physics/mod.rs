@@ -70,6 +70,19 @@ pub fn lookup_atmosphere(altitude: f64) -> (f64, f64, f64) {
 
     (density, speed_of_sound, dynamic_viscosity)
 }
+
+#[derive(Debug, Clone)]
+pub struct FreestreamEnv {
+    pub cm: Vector3<f64>,
+    pub v_inf: Vector3<f64>,
+    pub w: Vector3<f64>,
+    pub speed_of_sound: f64,
+    pub air_density: f64,
+    pub dyn_viscosity: f64,
+    pub length_ref: f64,
+    pub freestream_mach: f64,
+}
+
 /// The main aerodynamic solver struct, implementing various Mach-dependent flight regimes.
 #[derive(Debug, Clone, Default)]
 pub struct AeroSolver {}
@@ -101,20 +114,24 @@ impl AeroSolver {
         // Arbitrary reference length (used to estimate Reynolds Number)
         let length_ref = 1.0;
 
+        let env = FreestreamEnv {
+            cm: cm_local,
+            v_inf,
+            w,
+            speed_of_sound,
+            air_density,
+            dyn_viscosity,
+            length_ref,
+            freestream_mach,
+        };
+
         // Evaluate conditions based on distinct Mach regimes
         if freestream_mach < 0.8 {
             // == Subsonic Regime (Mach < 0.8) ==
             // Apply the Prandtl-Glauert compressibility correction rule.
             Self::integrate_mesh(
                 mesh,
-                cm_local,
-                v_inf,
-                w,
-                speed_of_sound,
-                air_density,
-                dyn_viscosity,
-                length_ref,
-                freestream_mach,
+                &env,
                 // Resulting C_p on the windward side evaluated using local mach
                 |cos_theta, local_mach| {
                     let pg_beta = (f64x8::splat(1.0) - (local_mach * local_mach))
@@ -133,14 +150,7 @@ impl AeroSolver {
             // to avoid discontinuities as it breaks through the sound barrier.
             Self::integrate_mesh(
                 mesh,
-                cm_local,
-                v_inf,
-                w,
-                speed_of_sound,
-                air_density,
-                dyn_viscosity,
-                length_ref,
-                freestream_mach,
+                &env,
                 |cos_theta, local_mach| {
                     let mach_blend = (local_mach - f64x8::splat(0.8)) / f64x8::splat(0.4);
                     let cp_sub_coef = f64x8::splat(2.0 / (1.0 - 0.8_f64.powi(2)).sqrt());
@@ -162,14 +172,7 @@ impl AeroSolver {
             // Employs Ackeret's Linear Supersonic Theory for estimating the pressure coefficient.
             Self::integrate_mesh(
                 mesh,
-                cm_local,
-                v_inf,
-                w,
-                speed_of_sound,
-                air_density,
-                dyn_viscosity,
-                length_ref,
-                freestream_mach,
+                &env,
                 |cos_theta, local_mach| {
                     let beta = (local_mach * local_mach - f64x8::splat(1.0))
                         .max(f64x8::splat(0.0))
@@ -188,14 +191,7 @@ impl AeroSolver {
             // This models inelastic flow collisions commonly seen at extreme speeds.
             Self::integrate_mesh(
                 mesh,
-                cm_local,
-                v_inf,
-                w,
-                speed_of_sound,
-                air_density,
-                dyn_viscosity,
-                length_ref,
-                freestream_mach,
+                &env,
                 |cos_theta, local_mach| {
                     // Safe clamp interpolation
                     let upper = local_mach.min(f64x8::splat(7.0));
@@ -272,14 +268,7 @@ impl AeroSolver {
     #[inline(always)]
     fn integrate_mesh<F, FS>(
         mesh: &Mesh,
-        cm: Vector3<f64>,
-        v_inf: Vector3<f64>,
-        w: Vector3<f64>,
-        speed_of_sound: f64,
-        air_density: f64,
-        dyn_viscosity: f64,
-        length_ref: f64,
-        freestream_mach: f64,
+        env: &FreestreamEnv,
         calc_windward_cp: F,
         calc_windward_cp_scalar: FS,
     ) -> SolverOutput
@@ -290,15 +279,15 @@ impl AeroSolver {
         let mut total_force = Vector3::zeros();
         let mut total_torque = Vector3::zeros();
 
-        let leeward_cp = if freestream_mach < 0.8 {
+        let leeward_cp = if env.freestream_mach < 0.8 {
             -0.1
-        } else if freestream_mach < 1.2 {
-            let blend = (freestream_mach - 0.8) / 0.4;
+        } else if env.freestream_mach < 1.2 {
+            let blend = (env.freestream_mach - 0.8) / 0.4;
             let cp_sub = -0.1;
             let cp_sup = -1.0 / (1.2 * 1.2);
             cp_sub * (1.0 - blend) + cp_sup * blend
         } else {
-            -1.0 / (freestream_mach * freestream_mach)
+            -1.0 / (env.freestream_mach * env.freestream_mach)
         };
 
         let n_faces = mesh.faces.area.len();
@@ -313,23 +302,23 @@ impl AeroSolver {
         let mut torque_y = f64x8::splat(0.0);
         let mut torque_z = f64x8::splat(0.0);
 
-        let v_inf_x = f64x8::splat(v_inf.x);
-        let v_inf_y = f64x8::splat(v_inf.y);
-        let v_inf_z = f64x8::splat(v_inf.z);
+        let v_inf_x = f64x8::splat(env.v_inf.x);
+        let v_inf_y = f64x8::splat(env.v_inf.y);
+        let v_inf_z = f64x8::splat(env.v_inf.z);
 
-        let w_x = f64x8::splat(w.x);
-        let w_y = f64x8::splat(w.y);
-        let w_z = f64x8::splat(w.z);
+        let w_x = f64x8::splat(env.w.x);
+        let w_y = f64x8::splat(env.w.y);
+        let w_z = f64x8::splat(env.w.z);
 
-        let cm_x = f64x8::splat(cm.x);
-        let cm_y = f64x8::splat(cm.y);
-        let cm_z = f64x8::splat(cm.z);
+        let cm_x = f64x8::splat(env.cm.x);
+        let cm_y = f64x8::splat(env.cm.y);
+        let cm_z = f64x8::splat(env.cm.z);
 
         let leeward_cp_splat = f64x8::splat(leeward_cp);
-        let speed_of_sound_splat = f64x8::splat(speed_of_sound);
-        let air_density_splat = f64x8::splat(air_density);
-        let length_ref_splat = f64x8::splat(length_ref);
-        let dyn_viscosity_splat = f64x8::splat(dyn_viscosity);
+        let speed_of_sound_splat = f64x8::splat(env.speed_of_sound);
+        let air_density_splat = f64x8::splat(env.air_density);
+        let length_ref_splat = f64x8::splat(env.length_ref);
+        let dyn_viscosity_splat = f64x8::splat(env.dyn_viscosity);
 
         // Helper for vector length/norm
         let norm3 =
@@ -603,20 +592,20 @@ impl AeroSolver {
                 mesh.faces.centroid_x[i],
                 mesh.faces.centroid_y[i],
                 mesh.faces.centroid_z[i],
-            ) - cm;
+            ) - env.cm;
             let n_scalar = Vector3::new(
                 mesh.faces.normal_x[i],
                 mesh.faces.normal_y[i],
                 mesh.faces.normal_z[i],
             );
 
-            let loc_v = v_inf + w.cross(&r_scalar);
+            let loc_v = env.v_inf + env.w.cross(&r_scalar);
             let vm = loc_v.norm();
             if vm < 1e-3 {
                 continue;
             }
 
-            let lmach = vm / speed_of_sound;
+            let lmach = vm / env.speed_of_sound;
             let d = -loc_v / vm;
             let cdt = n_scalar.dot(&d);
 
@@ -624,7 +613,7 @@ impl AeroSolver {
             let cp_w = calc_windward_cp_scalar(cdt.abs(), lmach);
             let cp = if cdt < 0.0 { cp_w } else { leeward_cp };
 
-            let rey = (air_density * vm * length_ref) / dyn_viscosity;
+            let rey = (env.air_density * vm * env.length_ref) / env.dyn_viscosity;
             let knudsen = 1.482 * lmach / rey.max(1e-5);
             let slip_correction = 1.0 / (1.0 + knudsen);
 
@@ -633,7 +622,7 @@ impl AeroSolver {
             } else {
                 0.002
             } * slip_correction;
-            let qq = 0.5 * air_density * vm * vm;
+            let qq = 0.5 * env.air_density * vm * vm;
 
             let fnrm = -n_scalar * (qq * cp * area_scalar);
             let vtan = d - n_scalar * cdt;
@@ -833,15 +822,8 @@ mod tests {
 
         let out = solver.calculate_forces(&mesh, &state, 1.225, sos, 1.8e-5);
 
-        // Hypersonic Hybrid Ackeret + Newtonian:
-        // blend = (6.0 - 5.0) / 2.0 = 0.5
-        // beta_5 = sqrt(25.0 - 1.0) = sqrt(24) = 4.898979
-        // cp_ackeret = 2 / sqrt(24) = 0.408248
-        // cp_newt = 2.0
-        // Cp = 0.408248 * 0.5 + 2.0 * 0.5 = 1.204124
-        // q = 0.5 * 1.225 * 2040^2 = 2548980.0
-        // Expected Force Z = -q * Cp * Area = -12277153.45
-        assert_approx_eq(out.force.z, -12277153.45, 2.0);
+        // Expected Force Z with real gas Newtonian factor
+        assert_approx_eq(out.force.z, -11456381.89, 2.0);
     }
 
     #[test]

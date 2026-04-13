@@ -14,7 +14,6 @@ pub struct DigitalTwin {
     pub solver: AeroSolver,
     pub mesh_generator: Box<dyn MeshGenerator>,
     pub current_mesh: Mesh,
-    rk4: crate::integ::Rk4,
 }
 
 impl DigitalTwin {
@@ -31,7 +30,6 @@ impl DigitalTwin {
             mesh_generator,
             rocket,
             current_mesh: Mesh::default(),
-            rk4: crate::integ::Rk4 {},
         }
     }
 
@@ -68,7 +66,7 @@ impl DigitalTwin {
                 (aero.force + thrust, aero.torque + torque)
             };
 
-        self.state = self.rk4.step(&self.state, physics_engine, dt);
+        self.state = crate::integ::rk4_step(&self.state, physics_engine, dt);
     }
 
     fn update_flight_computer(&mut self, dt: f64) {

@@ -5,125 +5,135 @@ use uom::si::f64::{AngularVelocity, Length, Velocity};
 use uom::si::length::meter;
 use uom::si::velocity::meter_per_second;
 
-pub struct Rk4 {}
+pub struct Rk4State {
+    pub v: Vector3<f64>,
+    pub w: Vector3<f64>,
+    pub q: Quaternion<f64>,
+    pub p: Vector3<f64>,
+}
 
-impl Rk4 {
-    #[inline]
-    fn compute_derivatives<F>(
-        v: Vector3<f64>,
-        w: Vector3<f64>,
-        q: Quaternion<f64>,
-        p: Vector3<f64>,
-        mass: f64,
-        inertia: &Matrix3<f64>,
-        inertia_inv: &Matrix3<f64>,
-        mut get_forces: F,
-    ) -> (Vector3<f64>, Vector3<f64>, Vector3<f64>, Quaternion<f64>)
-    where
-        F: FnMut(
-            Vector3<f64>,
-            Vector3<f64>,
-            Quaternion<f64>,
-            Vector3<f64>,
-        ) -> (Vector3<f64>, Vector3<f64>),
-    {
-        let q_u = UnitQuaternion::new_normalize(q);
+pub struct Rk4Body<'a> {
+    pub mass: f64,
+    pub inertia: &'a Matrix3<f64>,
+    pub inertia_inv: &'a Matrix3<f64>,
+}
 
-        // 1. SAMPLE PHYSICS: Get forces for this specific intermediate state
-        let (force_body, torque_body) = get_forces(v, w, q, p);
+#[inline]
+fn compute_derivatives<F>(
+    rk4_state: &Rk4State,
+    body: &Rk4Body,
+    mut get_forces: F,
+) -> (Vector3<f64>, Vector3<f64>, Vector3<f64>, Quaternion<f64>)
+where
+    F: FnMut(
+        Vector3<f64>,
+        Vector3<f64>,
+        Quaternion<f64>,
+        Vector3<f64>,
+    ) -> (Vector3<f64>, Vector3<f64>),
+{
+    let q_u = UnitQuaternion::new_normalize(rk4_state.q);
 
-        // 2. KINEMATICS
-        let dp = q_u * v;
+    // 1. SAMPLE PHYSICS: Get forces for this specific intermediate state
+    let (force_body, torque_body) = get_forces(rk4_state.v, rk4_state.w, rk4_state.q, rk4_state.p);
 
-        // 3. LINEAR DYNAMICS (Body Frame)
-        let gravity_world = Vector3::new(0.0, 0.0, -9.81);
-        let gravity_body = q_u.conjugate() * gravity_world;
-        let dv = (force_body / mass) + gravity_body - w.cross(&v);
+    // 2. KINEMATICS
+    let dp = q_u * rk4_state.v;
 
-        // 4. ROTATIONAL DYNAMICS (Body Frame)
-        let dw = inertia_inv * (torque_body - w.cross(&(inertia * w)));
+    // 3. LINEAR DYNAMICS (Body Frame)
+    let gravity_world = Vector3::new(0.0, 0.0, -9.81);
+    let gravity_body = q_u.conjugate() * gravity_world;
+    let dv = (force_body / body.mass) + gravity_body - rk4_state.w.cross(&rk4_state.v);
 
-        // 5. ORIENTATION DYNAMICS (Body Frame angular velocity implies post-multiplication)
-        let dq = q * Quaternion::new(0.0, w.x, w.y, w.z) * 0.5;
+    // 4. ROTATIONAL DYNAMICS (Body Frame)
+    let dw = body.inertia_inv * (torque_body - rk4_state.w.cross(&(body.inertia * rk4_state.w)));
 
-        (dp, dv, dw, dq)
-    }
+    // 5. ORIENTATION DYNAMICS (Body Frame angular velocity implies post-multiplication)
+    let dq = rk4_state.q * Quaternion::new(0.0, rk4_state.w.x, rk4_state.w.y, rk4_state.w.z) * 0.5;
 
-    pub fn step<F>(&mut self, state: &MissileState, mut get_forces: F, dt: f64) -> MissileState
-    where
-        F: FnMut(
-            Vector3<f64>,
-            Vector3<f64>,
-            Quaternion<f64>,
-            Vector3<f64>,
-        ) -> (Vector3<f64>, Vector3<f64>),
-    {
-        let mass = state.current_mass.value;
-        // Approximation: scale the identity inertia tensor by the total mass
-        // For a more accurate reading, you would want to calculate the actual moment of inertia for an elongating cylinder payload vs mass distribution over time.
-        let inertia = state.inertia_tensor * mass;
-        let inertia_inv = inertia.try_inverse().unwrap_or_else(Matrix3::identity);
+    (dp, dv, dw, dq)
+}
 
-        let p = state.position.map(|c| c.value);
-        let v = state.body_velocity.map(|c| c.value);
-        let w = state.angular_velocity.map(|c| c.value);
-        let q = *state.orientation.as_ref();
+pub fn rk4_step<F>(state: &MissileState, mut get_forces: F, dt: f64) -> MissileState
+where
+    F: FnMut(
+        Vector3<f64>,
+        Vector3<f64>,
+        Quaternion<f64>,
+        Vector3<f64>,
+    ) -> (Vector3<f64>, Vector3<f64>),
+{
+    let mass = state.current_mass.value;
+    // Approximation: scale the identity inertia tensor by the total mass
+    // For a more accurate reading, you would want to calculate the actual moment of inertia for an elongating cylinder payload vs mass distribution over time.
+    let inertia = state.inertia_tensor * mass;
+    let inertia_inv = inertia.try_inverse().unwrap_or_else(Matrix3::identity);
 
-        let dt_half = dt * 0.5;
+    let p = state.position.map(|c| c.value);
+    let v = state.body_velocity.map(|c| c.value);
+    let w = state.angular_velocity.map(|c| c.value);
+    let q = *state.orientation.as_ref();
 
-        // k1
-        let (k1_p, k1_v, k1_w, k1_q) =
-            Self::compute_derivatives(v, w, q, p, mass, &inertia, &inertia_inv, &mut get_forces);
+    let rk4_body = Rk4Body {
+        mass,
+        inertia: &inertia,
+        inertia_inv: &inertia_inv,
+    };
 
-        // k2
-        let (k2_p, k2_v, k2_w, k2_q) = Self::compute_derivatives(
-            v + k1_v * dt_half,
-            w + k1_w * dt_half,
-            q + k1_q * dt_half,
-            p + k1_p * dt_half,
-            mass,
-            &inertia,
-            &inertia_inv,
-            &mut get_forces,
-        );
+    let dt_half = dt * 0.5;
 
-        // k3
-        let (k3_p, k3_v, k3_w, k3_q) = Self::compute_derivatives(
-            v + k2_v * dt_half,
-            w + k2_w * dt_half,
-            q + k2_q * dt_half,
-            p + k2_p * dt_half,
-            mass,
-            &inertia,
-            &inertia_inv,
-            &mut get_forces,
-        );
+    // k1
+    let (k1_p, k1_v, k1_w, k1_q) =
+        compute_derivatives(&Rk4State { v, w, q, p }, &rk4_body, &mut get_forces);
 
-        // k4
-        let (k4_p, k4_v, k4_w, k4_q) = Self::compute_derivatives(
-            v + k3_v * dt,
-            w + k3_w * dt,
-            q + k3_q * dt,
-            p + k3_p * dt,
-            mass,
-            &inertia,
-            &inertia_inv,
-            &mut get_forces,
-        );
+    // k2
+    let (k2_p, k2_v, k2_w, k2_q) = compute_derivatives(
+        &Rk4State {
+            v: v + k1_v * dt_half,
+            w: w + k1_w * dt_half,
+            q: q + k1_q * dt_half,
+            p: p + k1_p * dt_half,
+        },
+        &rk4_body,
+        &mut get_forces,
+    );
 
-        let dt_sixth = dt / 6.0;
-        let next_p = p + (k1_p + k2_p * 2.0 + k3_p * 2.0 + k4_p) * dt_sixth;
-        let next_v = v + (k1_v + k2_v * 2.0 + k3_v * 2.0 + k4_v) * dt_sixth;
-        let next_w = w + (k1_w + k2_w * 2.0 + k3_w * 2.0 + k4_w) * dt_sixth;
-        let next_q = q + (k1_q + k2_q * 2.0 + k3_q * 2.0 + k4_q) * dt_sixth;
+    // k3
+    let (k3_p, k3_v, k3_w, k3_q) = compute_derivatives(
+        &Rk4State {
+            v: v + k2_v * dt_half,
+            w: w + k2_w * dt_half,
+            q: q + k2_q * dt_half,
+            p: p + k2_p * dt_half,
+        },
+        &rk4_body,
+        &mut get_forces,
+    );
 
-        MissileState {
-            position: next_p.map(Length::new::<meter>),
-            body_velocity: next_v.map(Velocity::new::<meter_per_second>),
-            orientation: UnitQuaternion::new_normalize(next_q),
-            angular_velocity: next_w.map(AngularVelocity::new::<radian_per_second>),
-            ..state.clone()
-        }
+    // k4
+    let (k4_p, k4_v, k4_w, k4_q) = compute_derivatives(
+        &Rk4State {
+            v: v + k3_v * dt,
+            w: w + k3_w * dt,
+            q: q + k3_q * dt,
+            p: p + k3_p * dt,
+        },
+        &rk4_body,
+        &mut get_forces,
+    );
+
+    let dt_sixth = dt / 6.0;
+    let next_p = p + (k1_p + k2_p * 2.0 + k3_p * 2.0 + k4_p) * dt_sixth;
+    let next_v = v + (k1_v + k2_v * 2.0 + k3_v * 2.0 + k4_v) * dt_sixth;
+    let next_w = w + (k1_w + k2_w * 2.0 + k3_w * 2.0 + k4_w) * dt_sixth;
+    let next_q = q + (k1_q + k2_q * 2.0 + k3_q * 2.0 + k4_q) * dt_sixth;
+
+    MissileState {
+        position: next_p.map(Length::new::<meter>),
+        body_velocity: next_v.map(Velocity::new::<meter_per_second>),
+        orientation: UnitQuaternion::new_normalize(next_q),
+        angular_velocity: next_w.map(AngularVelocity::new::<radian_per_second>),
+        ..state.clone()
     }
 }
 
@@ -176,14 +186,13 @@ mod tests {
                 (Vector3::zeros(), Vector3::zeros())
             };
 
-        let (dp, dv, _dw, _dq) = Rk4::compute_derivatives(
-            v_body,
-            w,
-            q,
-            p,
-            mass,
-            &inertia,
-            &inertia_inv,
+        let (dp, dv, _dw, _dq) = compute_derivatives(
+            &Rk4State { v: v_body, w, q, p },
+            &Rk4Body {
+                mass,
+                inertia: &inertia,
+                inertia_inv: &inertia_inv,
+            },
             &mut get_forces,
         );
 
@@ -206,8 +215,15 @@ mod tests {
 
         let mut get_forces = |_, _, _, _| (Vector3::zeros(), Vector3::zeros());
 
-        let (dp, dv, dw, dq) =
-            Rk4::compute_derivatives(v, w, q, p, mass, &inertia, &inertia_inv, &mut get_forces);
+        let (dp, dv, dw, dq) = compute_derivatives(
+            &Rk4State { v, w, q, p },
+            &Rk4Body {
+                mass,
+                inertia: &inertia,
+                inertia_inv: &inertia_inv,
+            },
+            &mut get_forces,
+        );
 
         assert_eq!(
             dp,
@@ -244,8 +260,15 @@ mod tests {
         // Upward lift forces balancing out gravity completely -> 9.81 * 2.0 = 19.62 upward
         let mut get_forces = |_, _, _, _| (Vector3::new(0.0, 0.0, 19.62), Vector3::zeros());
 
-        let (dp, dv, _, _) =
-            Rk4::compute_derivatives(v, w, q, p, mass, &inertia, &inertia_inv, &mut get_forces);
+        let (dp, dv, _, _) = compute_derivatives(
+            &Rk4State { v, w, q, p },
+            &Rk4Body {
+                mass,
+                inertia: &inertia,
+                inertia_inv: &inertia_inv,
+            },
+            &mut get_forces,
+        );
 
         assert_eq!(
             dp,
@@ -271,8 +294,15 @@ mod tests {
 
         let mut get_forces = |_, _, _, _| (Vector3::zeros(), Vector3::zeros());
 
-        let (_, dv, _, _) =
-            Rk4::compute_derivatives(v, w, q, p, mass, &inertia, &inertia_inv, &mut get_forces);
+        let (_, dv, _, _) = compute_derivatives(
+            &Rk4State { v, w, q, p },
+            &Rk4Body {
+                mass,
+                inertia: &inertia,
+                inertia_inv: &inertia_inv,
+            },
+            &mut get_forces,
+        );
 
         // dv = g - w x v = (0, 0, -9.81) - ((2, 0, 0) x (0, 0, 10))
         // (2, 0, 0) x (0, 0, 10) = (0, -20, 0)
@@ -297,8 +327,15 @@ mod tests {
 
         let mut get_forces = |_, _, _, _| (Vector3::zeros(), Vector3::zeros());
 
-        let (_, _, dw, _) =
-            Rk4::compute_derivatives(v, w, q, p, mass, &inertia, &inertia_inv, &mut get_forces);
+        let (_, _, dw, _) = compute_derivatives(
+            &Rk4State { v, w, q, p },
+            &Rk4Body {
+                mass,
+                inertia: &inertia,
+                inertia_inv: &inertia_inv,
+            },
+            &mut get_forces,
+        );
 
         // I = diag(1, 2, 3), w = (1, 1, 1)
         // I*w = (1, 2, 3)
@@ -321,8 +358,15 @@ mod tests {
 
         let mut get_forces = |_, _, _, _| (Vector3::zeros(), Vector3::zeros());
 
-        let (_, _, _, dq) =
-            Rk4::compute_derivatives(v, w, q, p, mass, &inertia, &inertia_inv, &mut get_forces);
+        let (_, _, _, dq) = compute_derivatives(
+            &Rk4State { v, w, q, p },
+            &Rk4Body {
+                mass,
+                inertia: &inertia,
+                inertia_inv: &inertia_inv,
+            },
+            &mut get_forces,
+        );
 
         // dq = 0.5 * q * (0, w)
         // q = I. (0, w) = (0, 2, 0, 0)
@@ -347,8 +391,15 @@ mod tests {
         // Applied pure torque on the body x axis
         let mut get_forces = |_, _, _, _| (Vector3::zeros(), Vector3::new(10.0, 0.0, 0.0));
 
-        let (_, _, dw, _) =
-            Rk4::compute_derivatives(v, w, q, p, mass, &inertia, &inertia_inv, &mut get_forces);
+        let (_, _, dw, _) = compute_derivatives(
+            &Rk4State { v, w, q, p },
+            &Rk4Body {
+                mass,
+                inertia: &inertia,
+                inertia_inv: &inertia_inv,
+            },
+            &mut get_forces,
+        );
 
         // dw = I_inv * Torque = 0.5 * 10 = 5
         assert_eq!(dw, Vector3::new(5.0, 0.0, 0.0));
@@ -356,11 +407,10 @@ mod tests {
 
     #[test]
     fn get_forces_called_exactly_four_times() {
-        let mut rk4 = Rk4 {};
         let state = dummy_state();
         let mut call_count = 0;
 
-        rk4.step(
+        rk4_step(
             &state,
             |_, _, _, _| {
                 call_count += 1;
@@ -377,10 +427,9 @@ mod tests {
 
     #[test]
     fn integration_step_updates_gravity_freefall_exactly() {
-        let mut rk4 = Rk4 {};
         let state = dummy_state();
 
-        let next_state = rk4.step(
+        let next_state = rk4_step(
             &state,
             |_, _, _, _| (Vector3::zeros(), Vector3::zeros()),
             1.0,
@@ -400,14 +449,13 @@ mod tests {
 
     #[test]
     fn non_singular_inertia_handled_gracefully() {
-        let mut rk4 = Rk4 {};
         let mut state = dummy_state();
         // Give an uninvertible inertia (0 matrix)
         state.inertia_tensor = Matrix3::zeros();
 
         // Torques apply natively over identity fallback for the uninvertible tensor
         let mut call_count = 0;
-        rk4.step(
+        rk4_step(
             &state,
             |_, _, _, _| {
                 call_count += 1;
