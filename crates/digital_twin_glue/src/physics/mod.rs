@@ -384,7 +384,7 @@ fn get_leeward_cp(mach: f64) -> f64 {
 /// SIMD lets us load 8 triangles into the CPU, and when we say "multiply by the wind speed",
 /// the CPU multiplies all 8 at once in a single tick.
 ///
-/// This function loops over the rocket, grabbing chunks of 8 triangles, finding out exactly
+/// This function loops over the rocket mesh, grabbing chunks of 8 triangles, finding out exactly
 /// what angle they face the wind, calculating the pressure and skin friction, and then
 /// summing everything up to find the total push and twist on the rocket snippet.
 fn integrate_simd_chunks<F>(
@@ -397,6 +397,22 @@ fn integrate_simd_chunks<F>(
 where
     F: Fn(f64x8, f64x8) -> f64x8,
 {
+    // --- SIMD Integration Loop ---
+    // This function is the heart of the mesh integration process for aerodynamic forces.
+    // It processes the mesh in blocks of 8 triangles at a time using SIMD (Single Instruction, Multiple Data),
+    // which means the CPU can do the same math for 8 triangles in parallel, making things much faster.
+    //
+    // The loop below calculates the force and torque for each chunk of 8 triangles, considering:
+    // - The area and orientation of each triangle
+    // - The local wind velocity (including both translation and rotation)
+    // - The angle between the wind and the triangle (to determine pressure and friction)
+    // - Whether the triangle is facing into the wind (windward) or away (leeward)
+    // - The local Mach number and Reynolds number (to pick the right physics)
+    // - The resulting force and torque contributions
+    //
+    // The result is a sum of all the little pushes and twists from each triangle, giving the net aerodynamic effect.
+
+    // Accumulators for force and torque in each direction (SIMD vectors)
     let mut force_x = f64x8::splat(0.0);
     let mut force_y = f64x8::splat(0.0);
     let mut force_z = f64x8::splat(0.0);
@@ -405,6 +421,7 @@ where
     let mut torque_y = f64x8::splat(0.0);
     let mut torque_z = f64x8::splat(0.0);
 
+    // Preload environment values as SIMD vectors for efficiency
     let v_inf_x = f64x8::splat(env.v_inf.x);
     let v_inf_y = f64x8::splat(env.v_inf.y);
     let v_inf_z = f64x8::splat(env.v_inf.z);
@@ -426,117 +443,111 @@ where
     for c in 0..chunks {
         let offset = c * 8;
 
-        // Load the face areas for these 8 elements into a standard vector block safely mapping boundary constraints.
+        // 1. Get the area of each triangle in this chunk. If a triangle is too small, skip it.
         let area = load_chunk(&mesh.faces.area, offset);
-
-        // Terminate cleanly for degenerate elements preventing divide faults propagating arbitrarily.
         let area_mask = area.simd_ge(f64x8::splat(1e-8));
         if area_mask.to_array() == [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] {
             continue;
         }
 
-        // Establish the moment arm radius vector directly to centroid mapped around object CM.
+        // 2. Find the position of each triangle's center (centroid) and its offset from the rocket's center of mass.
         let cx = load_chunk(&mesh.faces.centroid_x, offset);
         let cy = load_chunk(&mesh.faces.centroid_y, offset);
         let cz = load_chunk(&mesh.faces.centroid_z, offset);
-
         let rx = cx - cm_x;
         let ry = cy - cm_y;
         let rz = cz - cm_z;
 
-        // Overlay rotational velocities directly to absolute translational paths computing combined flow.
+        // 3. Calculate the local wind velocity at each triangle, including both the rocket's movement and its rotation.
+        //    This is done by adding the translational velocity (v_inf) and the rotational velocity (w x r).
         let (cross_x, cross_y, cross_z) = cross3(w_x, w_y, w_z, rx, ry, rz);
         let v_local_x = v_inf_x + cross_x;
         let v_local_y = v_inf_y + cross_y;
         let v_local_z = v_inf_z + cross_z;
 
+        // 4. Find the speed (magnitude) of the local wind at each triangle.
         let v_mag = norm3(v_local_x, v_local_y, v_local_z);
 
-        // Check local velocities bounding static stall limits strictly avoiding math limits aggressively.
+        // 5. If the wind is too slow or the triangle is too small, skip it.
         let v_mag_mask = v_mag.simd_ge(f64x8::splat(1e-3));
         let valid_mask = area_mask & v_mag_mask;
         if valid_mask.to_array() == [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] {
             continue;
         }
 
-        // Evaluate localized mach number bounded strictly by minimum velocity thresholds avoiding zero logic.
+        // 6. Calculate the local Mach number (speed relative to the speed of sound).
         let safe_v_mag = v_mag.max(f64x8::splat(1e-3));
         let local_mach = safe_v_mag / speed_of_sound_splat;
 
-        // Determine specific incident vectors uniformly mapping inverted normalized flow directions efficiently.
+        // 7. Figure out which way the wind is blowing at each triangle (unit vector).
         let v_dir_x = (f64x8::splat(0.0) - v_local_x) / safe_v_mag;
         let v_dir_y = (f64x8::splat(0.0) - v_local_y) / safe_v_mag;
         let v_dir_z = (f64x8::splat(0.0) - v_local_z) / safe_v_mag;
 
+        // 8. Get the normal vector for each triangle (which way the triangle is "facing").
         let nx = load_chunk(&mesh.faces.normal_x, offset);
         let ny = load_chunk(&mesh.faces.normal_y, offset);
         let nz = load_chunk(&mesh.faces.normal_z, offset);
 
-        // Derive dot product checking specific relative angle relationships (Negative indicates normal is facing flow).
+        // 9. Compute the angle between the wind and the triangle's normal (cos_theta).
+        //    If cos_theta < 0, the triangle is facing into the wind (windward).
         let cos_theta = (nx * v_dir_x) + (ny * v_dir_y) + (nz * v_dir_z);
-
-        // Mask elements determining windward facing elements needing dynamic compressibility pressure distributions.
         let windward_mask = cos_theta.simd_lt(f64x8::splat(0.0));
 
-        // Evaluate generalized aerodynamic compression coefficient across localized faces cleanly matching current regime explicitly.
+        // 10. Calculate the pressure coefficient (c_p) for each triangle.
+        //     Use the provided function for windward faces, or a leeward value otherwise.
         let cp_windward = calc_windward_cp(cos_theta.abs(), local_mach);
         let c_p = windward_mask.blend(cp_windward, leeward_cp_splat);
 
-        // Utilize freestream Reynolds limits directly mapping flow energy correctly applying specific transition dynamics.
+        // 11. Calculate the Reynolds number (how turbulent the flow is) and decide if the flow is turbulent.
         let reynolds = (air_density_splat * safe_v_mag * length_ref_splat) / dyn_viscosity_splat;
         let turbulent_mask = reynolds.simd_gt(f64x8::splat(1e5));
 
-        // Establish localized Knudsen number accurately applying specific slip friction bounds to high attitude molecular drag.
+        // 12. Calculate the Knudsen number (for rarefied gas effects) and slip correction for high altitudes.
         let safe_reynolds = reynolds.max(f64x8::splat(1e-5));
         let knudsen = f64x8::splat(1.482) * local_mach / safe_reynolds;
         let slip_correction = f64x8::splat(1.0) / (f64x8::splat(1.0) + knudsen);
 
-        // Approximate skin friction explicitly replacing standard power branches aggressively reducing 0.2 exponential overhead.
+        // 13. Estimate the skin friction coefficient (c_f) for each triangle.
+        //     Use a fast approximation for turbulent flow, or a constant for laminar.
         let cp_turb = map_f64x8(safe_reynolds, |r| 0.074 * fast_inv_fifth_root(r));
-
-        // Mask specific transitioned boundary limits reliably blending final resulting limits exactly mapping specific friction models.
         let c_f = turbulent_mask.blend(cp_turb, f64x8::splat(0.002)) * slip_correction;
 
-        // Establish raw dynamic pressure values acting cleanly universally against every geometry component mathematically.
+        // 14. Calculate the dynamic pressure (q) at each triangle.
         let q = f64x8::splat(0.5) * air_density_splat * safe_v_mag * safe_v_mag;
 
-        // Extract localized uniform structural absolute resulting bounds reliably distributing net forces symmetrically.
+        // 15. Compute the normal force (from pressure) for each triangle.
         let fn_mag = q * c_p * area;
         let fn_x = (f64x8::splat(0.0) - nx) * fn_mag;
         let fn_y = (f64x8::splat(0.0) - ny) * fn_mag;
         let fn_z = (f64x8::splat(0.0) - nz) * fn_mag;
 
-        // Determine generalized surface tangential trajectories mapping flow precisely mapping lateral directions cleanly.
+        // 16. Compute the tangential (friction) force for each triangle.
         let vt_x = v_dir_x - (nx * cos_theta);
         let vt_y = v_dir_y - (ny * cos_theta);
         let vt_z = v_dir_z - (nz * cos_theta);
         let vt_mag = norm3(vt_x, vt_y, vt_z);
-
-        // Sanitize tangential limits ignoring directly perpendicular incidence mapping cleanly.
         let tangent_mask = vt_mag.simd_gt(f64x8::splat(1e-6));
         let safe_vt_mag = vt_mag.max(f64x8::splat(1e-6));
         let tangent_dir_x = vt_x / safe_vt_mag;
         let tangent_dir_y = vt_y / safe_vt_mag;
         let tangent_dir_z = vt_z / safe_vt_mag;
-
         let ft_mag = q * c_f * area;
-
-        // Apply skin-friction explicitly parallel across specific valid boundary masks limiting arbitrary faults.
         let ft_x = tangent_mask.blend(tangent_dir_x * ft_mag, f64x8::splat(0.0));
         let ft_y = tangent_mask.blend(tangent_dir_y * ft_mag, f64x8::splat(0.0));
         let ft_z = tangent_mask.blend(tangent_dir_z * ft_mag, f64x8::splat(0.0));
 
-        // Incorporate specific normal limits and valid masks limiting specific valid total sum structures globally.
+        // 17. Add up the total force (normal + friction) for each triangle, but only if it's valid.
         let f_x = valid_mask.blend(fn_x + ft_x, f64x8::splat(0.0));
         let f_y = valid_mask.blend(fn_y + ft_y, f64x8::splat(0.0));
         let f_z = valid_mask.blend(fn_z + ft_z, f64x8::splat(0.0));
 
-        // Consolidate total applied boundary force sums accurately preserving state vectors.
+        // 18. Accumulate the force and torque for this chunk.
         force_x += f_x;
         force_y += f_y;
         force_z += f_z;
 
-        // Resolve moment components mapping absolute generated bounds seamlessly matching object references strictly.
+        // 19. Calculate the torque (moment) from each triangle's force about the center of mass.
         let (t_x, t_y, t_z) = cross3(rx, ry, rz, f_x, f_y, f_z);
         torque_x += t_x;
         torque_y += t_y;
@@ -567,15 +578,15 @@ where
     (total_force, total_torque)
 }
 
-/// The cleanup crew for the triangles that got left over.
+/// Handles the leftover triangles that don't fit into a full SIMD chunk.
 ///
-/// Because our super-fast SIMD function above only works in chunks of 8 triangles,
-/// what happens if the rocket has 10 triangles total? The first 8 triangles run fast,
-/// but there are 2 leftovers at the end.
+/// Our fast SIMD integration works in groups of 8 triangles at a time. But if the mesh
+/// has a number of triangles that's not a multiple of 8, there will be a few left at the end.
+/// This function processes those remaining triangles one by one, using the same aerodynamic
+/// calculations as the SIMD version, but in plain, readable math.
 ///
-/// This function is standard "scalar" math it simply calculates the leftover triangles
-/// one by one. By only doing this for the last 0 to 7 triangles, it's fast enough
-/// and prevents the program from crashing by trying to load empty triangles.
+///
+/// This function is only called for the last 0 to 7 triangles, so it's not a performance bottleneck.
 fn integrate_scalar_remainder<FS>(
     mesh: &Mesh,
     env: &FreestreamEnv,
@@ -591,86 +602,100 @@ where
     let mut total_torque = Vector3::zeros();
 
     for i in remainder_start..n_faces {
-        let area_scalar = mesh.faces.area[i];
-
-        // Terminate specific minimal elements safely preventing divide by zero states mapping strictly.
-        if area_scalar < 1e-8 {
+        // 1. Get the area of the triangle. If it's too small, skip it.
+        let area = mesh.faces.area[i];
+        if area < 1e-8 {
             continue;
         }
 
-        // Map relative torque arms mapping directly against primary center of mass coordinates securely.
-        let r_scalar = Vector3::new(
+        // 2. Find the centroid (center) of the triangle and its offset from the rocket's center of mass.
+        let r = Vector3::new(
             mesh.faces.centroid_x[i],
             mesh.faces.centroid_y[i],
             mesh.faces.centroid_z[i],
         ) - env.cm;
 
-        // Isolate primary surface normals acting orthogonally against bounds predictably.
-        let n_scalar = Vector3::new(
+        // 3. Get the normal vector for the triangle (which way it's facing).
+        let n = Vector3::new(
             mesh.faces.normal_x[i],
             mesh.faces.normal_y[i],
             mesh.faces.normal_z[i],
         );
 
-        // Derive specific localized total absolute trajectory components dynamically bounded cleanly.
-        let loc_v = env.v_inf + env.w.cross(&r_scalar);
-        let vm = loc_v.norm();
-        if vm < 1e-3 {
+        // 4. Calculate the local wind velocity at this triangle (translation + rotation).
+        let v_local = env.v_inf + env.w.cross(&r);
+        let v_mag = v_local.norm();
+        if v_mag < 1e-3 {
             continue;
         }
 
-        let lmach = vm / env.speed_of_sound;
+        // 5. Calculate the local Mach number (speed relative to the speed of sound).
+        let mach = v_mag / env.speed_of_sound;
 
-        // Limit incidence angle checking negative absolute boundaries defining orientation completely safely.
-        let d = -loc_v / vm;
-        let cdt = n_scalar.dot(&d);
+        // 6. Figure out the wind direction (unit vector, points into the wind).
+        let v_dir = -v_local / v_mag;
 
-        // Assign windward bounds explicitly substituting specific regimes using isolated fallback rules cleanly.
-        let cp_w = calc_windward_cp_scalar(cdt.abs(), lmach);
-        let cp = if cdt < 0.0 { cp_w } else { leeward_cp };
+        // 7. Compute the angle between the wind and the triangle's normal.
+        let cos_theta = n.dot(&v_dir);
+        let windward = cos_theta < 0.0;
 
-        // Process boundary slip factors smoothing high turbulence specifically addressing supersonic and hypersonics accurately.
-        let rey = (env.air_density * vm * env.length_ref) / env.dyn_viscosity;
-        let knudsen = 1.482 * lmach / rey.max(1e-5);
+        // 8. Calculate the pressure coefficient for this triangle.
+        let cp = if windward {
+            calc_windward_cp_scalar(cos_theta.abs(), mach)
+        } else {
+            leeward_cp
+        };
+
+        // 9. Calculate the Reynolds number and slip correction for rarefied gas effects.
+        let reynolds = (env.air_density * v_mag * env.length_ref) / env.dyn_viscosity;
+        let knudsen = 1.482 * mach / reynolds.max(1e-5);
         let slip_correction = 1.0 / (1.0 + knudsen);
 
-        let cf = if rey > 1e5 {
-            0.074 * fast_inv_fifth_root(rey)
+        // 10. Estimate the skin friction coefficient (c_f) for this triangle.
+        let c_f = if reynolds > 1e5 {
+            0.074 * fast_inv_fifth_root(reynolds)
         } else {
             0.002
         } * slip_correction;
 
-        // Incorporate final dynamic constants limiting absolute pressure values matching specific densities natively.
-        let qq = 0.5 * env.air_density * vm * vm;
+        // 11. Calculate the dynamic pressure (q) at this triangle.
+        let q = 0.5 * env.air_density * v_mag * v_mag;
 
-        // Apply raw computed pressure coefficients projecting perfectly mapped loads over isolated element areas explicitly.
-        let fnrm = -n_scalar * (qq * cp * area_scalar);
-        let vtan = d - n_scalar * cdt;
-        let vtm = vtan.norm();
-        let ftan = if vtm > 1e-6 {
-            (vtan / vtm) * (qq * cf * area_scalar)
+        // 12. Compute the normal force (from pressure).
+        let fn_vec = -n * (q * cp * area);
+
+        // 13. Compute the tangential (friction) force.
+        let v_tan = v_dir - n * cos_theta;
+        let v_tan_mag = v_tan.norm();
+        let ft_vec = if v_tan_mag > 1e-6 {
+            (v_tan / v_tan_mag) * (q * c_f * area)
         } else {
             Vector3::zeros()
         };
 
-        // Complete final isolated net moment calculation projecting fully assembled element torque loads cleanly.
-        let f_el = fnrm + ftan;
-        total_force += f_el;
-        total_torque += r_scalar.cross(&f_el);
+        // 14. Add up the total force (normal + friction).
+        let f = fn_vec + ft_vec;
+        total_force += f;
+
+        // 15. Calculate the torque (moment) from this triangle's force about the center of mass.
+        total_torque += r.cross(&f);
     }
 
     (total_force, total_torque)
 }
 
-/// The master controller for adding up all the aerodynamic forces.
+/// The main controller that sums up all aerodynamic forces and torques on the rocket mesh.
 ///
-/// It manages the work by splitting the mesh into completely full 8-triangle chunks,
-/// passing those to our lightning-fast SIMD processor (`integrate_simd_chunks`),
-/// and then passing any leftover parts to the slow-but-steady scalar backup
-/// (`integrate_scalar_remainder`).
+/// This function splits the mesh into two parts:
+/// 1. Chunks of 8 triangles (handled by the fast SIMD function)
+/// 2. Any leftover triangles (handled by the scalar function)
 ///
-/// Finally, it takes the push forces from both of those groups and lumps them into
-/// a single total force and total twist representing the entire rocket shape.
+/// It first processes all the full SIMD chunks for speed, then handles any remaining triangles
+/// one by one to ensure every part of the mesh is included. The results from both are added together
+/// to get the total force and torque acting on the rocket.
+///
+/// This approach guarantees both high performance and complete accuracy, no matter how many triangles
+/// are in the mesh.
 fn integrate_mesh<F, FS>(
     mesh: &Mesh,
     env: &FreestreamEnv,
