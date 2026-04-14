@@ -140,7 +140,7 @@ pub fn tune_pi(base_config: &MissileConfig, target: Vector3<f64>, dt: f64, itera
 
     let num_wolves = 100;
     // kp, ki, kd bounds per stage
-    let bounds_max = [1.0, 0.5, 0.2];
+    let bounds_max = [100.0, 50.0, 20.0];
 
     let mut population: Vec<Wolf> = (0..num_wolves)
         .map(|_| {
